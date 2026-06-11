@@ -94,6 +94,8 @@ lub dokumentową (PDF: stałe zdjęcia).
 if (!require("quantmod")) install.packages("quantmod")
 library(quantmod)
 library(ggplot2)
+library(readxl)
+library(tseries)
 
 if (!require("highcharter")) install.packages("highcharter")
 library("highcharter")
@@ -122,11 +124,10 @@ Następnie zostana wykorzystane bardziej złożone funkcje jak $VAR$ czy $ARIMAX
 wymiary (np. dane o inflacji, stopie bezrobocia czy PKB) aby zweryfikować
 wpływ danych makroekonomicznych.
 
+## Dane
+
 Dane giełdowe pobrane zostaną pobrane z biblioteki **quantmod** poprzez API
 Yahoo Finance do GPW (Giełdy Papierów Wartościowych).
-
-
-
 
 ```{r}
 #| fig-cap: !expr "if (knitr::is_latex_output()) 'Wykres akcji spółki PZU' else NULL"
@@ -144,6 +145,19 @@ if(FORMAT == "html"){
     theme = chartTheme("white"), name = "")
 }
 ```
+
+Wskaźniki makroekonomiczne zostały pobrane ze strony **GUS** 
+(Główny Urząd Statystyczny) z podstrony [Wskaźniki makroekonomiczne](https://bazydanych.new.stat.gov.pl/wskazniki-makroekonomiczne)
+i pliku **Kwartalne wskaźniki makroekonomiczne** i arkusza **RACHUNKI NARODOWE**.
+Te dane zostały następnie przerobione ręcznie do pliku **makro.xlsx**.
+
+```{r}
+makro <- read_excel("makro.xlsx")
+ts_data <- ts(makro$WARTOŚĆ, frequency = 4)
+
+plot(ts_data)
+```
+
 
 
 ```{r}
