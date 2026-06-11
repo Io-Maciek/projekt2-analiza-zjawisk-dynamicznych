@@ -21,6 +21,24 @@ format:
     toc: true
     embed-resources: true
     respect-user-color-scheme: true
+    include-in-header:
+      text: |
+        <style>
+          .quarto-color-scheme-toggle {
+            position: fixed !important;
+            top: 20px;
+            right: 20px;
+            z-index: 1000; /* Keeps it on top of all text and elements */
+            background: rgba(255, 255, 255, 0.8); /* Slight background so text doesn't clash */
+            padding: 5px 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+          }
+          /* Adjust background for dark mode compatibility */
+          .quarto-dark .quarto-color-scheme-toggle {
+            background: rgba(33, 33, 33, 0.8);
+          }
+        </style>
   pdf:
     toc: true
     number-sections: true
@@ -58,51 +76,75 @@ lang: pl
 
 # Inicjalizacja {.unnumbered}
 
+W tej części ładowane są biblioteki oraz inicjalizowane są zmienne.
 
-asdsad
-
-
-# Wstęp
-
-```{r}
-#| echo: false
-#| include: false
-library(ggplot2)
-
-FORMAT<-knitr::pandoc_to()
-FORMAT
-```
-
+Zmienna $FORMAT$ jest flagą, która wskazuje jaki silnik został wykorzystany
+podczas renderowania. Wykorzystane jest to podczas tworzenia wykresów. Język
+R wtedy decyduje, czy wyrenderować wersję internetową (HTML: grafy 
+interaktywne, zmieniające kolor w zależności od motywu), 
+lub dokumentową (PDF: stałe zdjęcia).
 
 ```{r}
-#| fig-cap: !expr "if (knitr::is_latex_output()) 'A line plot.' else NULL"
-#| renderings: [light, dark]
-par(bg = "#FFFFFF", fg = "#000000")
-plot(1:10,  main = "Tytuł asdsadsad")
-
-if(FORMAT=="html"){
-  par(bg = "#000000", fg = "#FFFFFF", col.axis = "#FFFFFF", col.lab = "#FFFFFF", col.main = "#FFFFFF")
-  plot(1:10,  main = "Tytuł wykresu")
-}
-```
-
-Raport będzie polegał na poddaniu analizie kilku szeregów czasowych (jednym z nich będą informacje giełdowe spółki PZU), zmapowanie ich do wspólnej częstotliwości, a następnie metodami VAR czy ARIMAX próby odnalezienia współkorelacji dodanych giełdowych i korelacji do innych szeregów czasowych i prognozowanie.
-
-Dodatkowo, bla bla bla.. bla bla.
-
-To pokazuje, żżę ...
-
-```{r}
-#| echo: false
+#| code-fold: TRUE
+#| code-summary: "Import bibliotek"
+#| echo: true
+#| results: "hide"
 #| warning: false
 #| message: false
 if (!require("quantmod")) install.packages("quantmod")
 library(quantmod)
+library(ggplot2)
+
+if (!require("highcharter")) install.packages("highcharter")
+library("highcharter")
+
+FORMAT<-knitr::pandoc_to()
+if (is.null(FORMAT)) {
+  FORMAT <- "html"
+}
 ```
 
+
+# Wstęp
+
+## Cel
+W tym projekcie porównamy różne metody predykcji akcji giełdowych spółki 
+**PZU** (Powszechny Zakład Ubezpieczeń S.A.) oraz zbadamy wpływ dodania innych
+zmiennych na jakość danych wyjściowych.
+
+Badanie rozpocznie się od stworzenia modelu naiwnego (bazowego), do którego
+porównywać się będą inne metryki. Model ten będzie zakładał, że 
+$$
+\text{predykowana cena} = \text{cena wczorajsza}
+$$
+Następnie zostana wykorzystane bardziej złożone funkcje jak $VAR$ czy $ARIMAX$
+(*przez autoarime*), do których później dodatkowo zostaną dołożone kolejne
+wymiary (np. dane o inflacji, stopie bezrobocia czy PKB) aby zweryfikować
+wpływ danych makroekonomicznych.
+
+Dane giełdowe pobrane zostaną pobrane z biblioteki **quantmod** poprzez API
+Yahoo Finance do GPW (Giełdy Papierów Wartościowych).
+
+
+
+
 ```{r}
-getSymbols("PZU.WA")
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'Wykres akcji spółki PZU' else NULL"
+#| renderings: [light, dark]
+pzu_raw<-getSymbols("PZU.WA", auto.assign = F)
+
+if(FORMAT == "html"){
+  highchart(type = "stock") %>% 
+    hc_title(text = "Wykres akcji spółki PZU") %>% 
+    hc_add_series(pzu_raw, name = "Cena zamknięcia") %>% 
+    hc_navigator(enabled = TRUE) %>%
+    hc_scrollbar(enabled = TRUE)
+}else{
+  chartSeries(pzu_raw, 
+    theme = chartTheme("white"), name = "")
+}
 ```
+
 
 ```{r}
 # https://stat.gov.pl/obszary-tematyczne/rynek-pracy/bezrobocie-rejestrowane/stopa-bezrobocia-rejestrowanego-w-latach-1990-2026,4,1.html
