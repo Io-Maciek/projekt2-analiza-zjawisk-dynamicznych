@@ -179,7 +179,7 @@ if(FORMAT == "html"){
 Wskaźniki makroekonomiczne zostały pobrane ze strony **GUS** 
 (Główny Urząd Statystyczny) 
 i pliku **Kwartalne wskaźniki makroekonomiczne** lub 
-**Wybrane miesięczne wskaźniki makroekonomiczne** [@gus_wskazniki_2026].
+**Wybrane miesięczne wskaźniki makroekonomiczne** [(@gus_wskazniki_2026)]{.content-visible when-format="pdf"}.
 
  - PKB pobrano z danych kwartalnych z arkusza **RACHUNKI NARODOWE**.
  - Inflacje pobrano z danych miesięcznych z arkusza **WSKAŹNIKI CEN**.
@@ -199,12 +199,23 @@ kwartal<-(as.numeric(format( min(as.Date(pkb_raw$DATA)),"%m")) - 1) %/% 3 + 1
 
 makro_ts <- ts(pkb_raw$WARTOŚĆ, frequency = 4, start = c(rok, kwartal))
 
+start_zagrozenia <- 2020 + (3 - 1) / 12
+koniec_zagrozenia <- 2023 + (6 - 1) / 12 
 
 plot(makro_ts,
   xlab = "Rok", ylab = "Wartość (zł)",
-  main =ifelse(FORMAT=="html","Produkt Krajowy Brutto Polski", ""),
+  main = ifelse(FORMAT=="html","Produkt Krajowy Brutto Polski", ""),
   col = "royalblue", lwd = 2)
 grid(col = "#cccccc")
+
+rect(start_zagrozenia, par("usr")[3], koniec_zagrozenia, par("usr")[4], 
+     col = rgb(1, 0, 0, 0.12), border = NA)
+
+legend("topleft", 
+       legend = "COVID",
+       fill = rgb(1, 0, 0, 0.12), 
+       border = NA, 
+       bty = "n")
 
 if(FORMAT == "html"){
   par(bg = "#222222", col.axis = "#dddddd", col.lab = "#dddddd", 
@@ -215,6 +226,15 @@ if(FORMAT == "html"){
     col = "#6baed6", lwd = 2)
   grid(col = "#444444")
   par(bg = "white") 
+  
+  rect(start_zagrozenia, par("usr")[3], koniec_zagrozenia, par("usr")[4], 
+     col = rgb(1, 0, 0, 0.12), border = NA)
+
+  legend("topleft", 
+         legend = "COVID",
+         fill = rgb(1, 0, 0, 0.12), 
+         border = NA, 
+         bty = "n")
 }
 ```
 ```{r}
@@ -234,6 +254,15 @@ plot(inflacja_ts,
   col = "royalblue", lwd = 2)
 grid(col = "#cccccc")
 
+rect(start_zagrozenia, par("usr")[3], koniec_zagrozenia, par("usr")[4], 
+     col = rgb(1, 0, 0, 0.12), border = NA)
+
+legend("topleft", 
+       legend = "COVID",
+       fill = rgb(1, 0, 0, 0.12), 
+       border = NA, 
+       bty = "n")
+
 if(FORMAT == "html"){
   par(bg = "#222222", col.axis = "#dddddd", col.lab = "#dddddd", 
       col.main = "#dddddd", fg = "#dddddd")
@@ -243,6 +272,15 @@ if(FORMAT == "html"){
     col = "#6baed6", lwd = 2)
   grid(col = "#444444")
   par(bg = "white") 
+  
+  rect(start_zagrozenia, par("usr")[3], koniec_zagrozenia, par("usr")[4], 
+     col = rgb(1, 0, 0, 0.12), border = NA)
+
+  legend("topleft", 
+         legend = "COVID",
+         fill = rgb(1, 0, 0, 0.12), 
+         border = NA, 
+         bty = "n")
 }
 ```
 
@@ -264,6 +302,15 @@ plot(bezrobocie_ts,
   col = "royalblue", lwd = 2)
 grid(col = "#cccccc")
 
+rect(start_zagrozenia, par("usr")[3], koniec_zagrozenia, par("usr")[4], 
+     col = rgb(1, 0, 0, 0.12), border = NA)
+
+legend("topleft", 
+       legend = "COVID",
+       fill = rgb(1, 0, 0, 0.12), 
+       border = NA, 
+       bty = "n")
+
 if(FORMAT == "html"){
   par(bg = "#222222", col.axis = "#dddddd", col.lab = "#dddddd", 
       col.main = "#dddddd", fg = "#dddddd")
@@ -273,10 +320,23 @@ if(FORMAT == "html"){
     col = "#6baed6", lwd = 2)
   grid(col = "#444444")
   par(bg = "white") 
+  
+  rect(start_zagrozenia, par("usr")[3], koniec_zagrozenia, par("usr")[4], 
+     col = rgb(1, 0, 0, 0.12), border = NA)
+
+  legend("topleft", 
+         legend = "COVID",
+         fill = rgb(1, 0, 0, 0.12), 
+         border = NA, 
+         bty = "n")
 }
 ```
 
+::: {.content-visible when-format="pdf"}
+
 # Bibliografia {.unnumbered}
+
+:::
 
 ::: {#refs}
 :::
