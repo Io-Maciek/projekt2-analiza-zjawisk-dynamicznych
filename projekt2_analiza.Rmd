@@ -126,6 +126,44 @@ if (is.null(FORMAT)) {
 ```
 
 
+```{r}
+rysuj_rdzen <- function(dane_ts, tytul, etykieta_y, kolory) {
+  plot(dane_ts, xlab = "Rok", ylab = etykieta_y, 
+       main = tytul, col = kolory$linia, lwd = 2)
+  grid(col = kolory$siatka)
+  
+  start_zagrozenia <- 2020 + (3 - 1) / 12
+  koniec_zagrozenia <- 2023 + (6 - 1) / 12
+  
+  rect(start_zagrozenia, par("usr")[3], koniec_zagrozenia, par("usr")[4], 
+       col = rgb(1, 0, 0, 0.12), border = NA)
+  
+  legend("topleft", legend = "COVID", fill = rgb(1, 0, 0, 0.12), 
+         border = NA, bty = "n")
+}
+
+rysuj_makro_wykres <- function(dane_ts, tytul, etykieta_y, format = "pdf") {
+  # Zawsze: jasna
+  jasne_kolory <- list(linia = "royalblue", siatka = "#cccccc")
+  par(bg = "white", col.axis = "black", col.lab = "black", col.main = "black", fg = "black")
+  rysuj_rdzen(dane_ts, ifelse(format == "html", tytul, ""), etykieta_y, jasne_kolory)
+  
+  # HTML: rysujemy też wersję ciemną
+  if (format == "html") {
+    par(bg = "#222222", col.axis = "#dddddd", col.lab = "#dddddd", 
+        col.main = "#dddddd", fg = "#dddddd")
+    ciemne_kolory <- list(linia = "#6baed6", siatka = "#444444")
+    rysuj_rdzen(dane_ts, tytul, etykieta_y, ciemne_kolory)
+    
+    # Reset po HTML
+    par(bg = "white", col.axis = "black", col.lab = "black", col.main = "black", fg = "black")
+  }
+}
+```
+
+
+
+
 # Wstęp
 
 ## Cel
@@ -197,45 +235,8 @@ pkb_raw <- read_excel("makro.xlsx", sheet = "PKB")
 rok<-as.numeric(format( min(as.Date(pkb_raw$DATA)), "%Y"))
 kwartal<-(as.numeric(format( min(as.Date(pkb_raw$DATA)),"%m")) - 1) %/% 3 + 1
 
-makro_ts <- ts(pkb_raw$WARTOŚĆ, frequency = 4, start = c(rok, kwartal))
-
-start_zagrozenia <- 2020 + (3 - 1) / 12
-koniec_zagrozenia <- 2023 + (6 - 1) / 12 
-
-plot(makro_ts,
-  xlab = "Rok", ylab = "Wartość (zł)",
-  main = ifelse(FORMAT=="html","Produkt Krajowy Brutto Polski", ""),
-  col = "royalblue", lwd = 2)
-grid(col = "#cccccc")
-
-rect(start_zagrozenia, par("usr")[3], koniec_zagrozenia, par("usr")[4], 
-     col = rgb(1, 0, 0, 0.12), border = NA)
-
-legend("topleft", 
-       legend = "COVID",
-       fill = rgb(1, 0, 0, 0.12), 
-       border = NA, 
-       bty = "n")
-
-if(FORMAT == "html"){
-  par(bg = "#222222", col.axis = "#dddddd", col.lab = "#dddddd", 
-      col.main = "#dddddd", fg = "#dddddd")
-  plot(makro_ts,
-    xlab = "Rok", ylab = "Wartość (zł)",
-    main = "Produkt Krajowy Brutto Polski",
-    col = "#6baed6", lwd = 2)
-  grid(col = "#444444")
-  par(bg = "white") 
-  
-  rect(start_zagrozenia, par("usr")[3], koniec_zagrozenia, par("usr")[4], 
-     col = rgb(1, 0, 0, 0.12), border = NA)
-
-  legend("topleft", 
-         legend = "COVID",
-         fill = rgb(1, 0, 0, 0.12), 
-         border = NA, 
-         bty = "n")
-}
+makro_ts <- ts(as.numeric(as.character(pkb_raw$WARTOŚĆ)), frequency = 4, start = c(rok, kwartal))
+rysuj_makro_wykres(makro_ts/1000, "Produkt Krajowy Brutto Polski", "Wartość (mln zł)", FORMAT)
 ```
 ```{r}
 #| fig-cap: !expr "if (knitr::is_latex_output()) 'Inflacja' else NULL"
@@ -245,43 +246,8 @@ inflacja_raw <- read_excel("makro.xlsx", sheet = "Inflacja")
 rok<-as.numeric(format( min(as.Date(inflacja_raw$DATA)), "%Y"))
 miesiac<-as.numeric(format( min(as.Date(inflacja_raw$DATA)),"%m"))
 
-inflacja_ts <- ts(inflacja_raw$WARTOŚĆ, frequency = 12, start = c(rok, miesiac))
-
-
-plot(inflacja_ts,
-  xlab = "Rok", ylab = "Inflacja",
-  main =ifelse(FORMAT=="html","Inflacja", ""),
-  col = "royalblue", lwd = 2)
-grid(col = "#cccccc")
-
-rect(start_zagrozenia, par("usr")[3], koniec_zagrozenia, par("usr")[4], 
-     col = rgb(1, 0, 0, 0.12), border = NA)
-
-legend("topleft", 
-       legend = "COVID",
-       fill = rgb(1, 0, 0, 0.12), 
-       border = NA, 
-       bty = "n")
-
-if(FORMAT == "html"){
-  par(bg = "#222222", col.axis = "#dddddd", col.lab = "#dddddd", 
-      col.main = "#dddddd", fg = "#dddddd")
-  plot(inflacja_ts,
-    xlab = "Rok", ylab = "Inflacja",
-    main = "Inflacja",
-    col = "#6baed6", lwd = 2)
-  grid(col = "#444444")
-  par(bg = "white") 
-  
-  rect(start_zagrozenia, par("usr")[3], koniec_zagrozenia, par("usr")[4], 
-     col = rgb(1, 0, 0, 0.12), border = NA)
-
-  legend("topleft", 
-         legend = "COVID",
-         fill = rgb(1, 0, 0, 0.12), 
-         border = NA, 
-         bty = "n")
-}
+inflacja_ts <- ts(as.numeric(as.character(inflacja_raw$WARTOŚĆ)), frequency = 12, start = c(rok, miesiac))
+rysuj_makro_wykres(inflacja_ts - 100, "Inflacja", "Inflacja %", FORMAT)
 ```
 
 
@@ -293,44 +259,10 @@ bezrobocie_raw <- read_excel("makro.xlsx", sheet = "Bezrobocie%")
 rok<-as.numeric(format( min(as.Date(bezrobocie_raw$DATA)), "%Y"))
 miesiac<-(as.numeric(format( min(as.Date(bezrobocie_raw$DATA)),"%m")) - 1)
 
-bezrobocie_ts <- ts(bezrobocie_raw$WARTOŚĆ, frequency = 12, start = c(rok, miesiac))
-
-
-plot(bezrobocie_ts,
-  xlab = "Rok", ylab = "% stopa bezrobocia",
-  main =ifelse(FORMAT=="html","Procentowa stopa bezrobocia", ""),
-  col = "royalblue", lwd = 2)
-grid(col = "#cccccc")
-
-rect(start_zagrozenia, par("usr")[3], koniec_zagrozenia, par("usr")[4], 
-     col = rgb(1, 0, 0, 0.12), border = NA)
-
-legend("topleft", 
-       legend = "COVID",
-       fill = rgb(1, 0, 0, 0.12), 
-       border = NA, 
-       bty = "n")
-
-if(FORMAT == "html"){
-  par(bg = "#222222", col.axis = "#dddddd", col.lab = "#dddddd", 
-      col.main = "#dddddd", fg = "#dddddd")
-  plot(bezrobocie_ts,
-    xlab = "Rok", ylab = "% stopa bezrobocia",
-    main = "Procentowa stopa bezrobocia",
-    col = "#6baed6", lwd = 2)
-  grid(col = "#444444")
-  par(bg = "white") 
-  
-  rect(start_zagrozenia, par("usr")[3], koniec_zagrozenia, par("usr")[4], 
-     col = rgb(1, 0, 0, 0.12), border = NA)
-
-  legend("topleft", 
-         legend = "COVID",
-         fill = rgb(1, 0, 0, 0.12), 
-         border = NA, 
-         bty = "n")
-}
+bezrobocie_ts <- ts(as.numeric(as.character(bezrobocie_raw$WARTOŚĆ)), frequency = 12, start = c(rok, miesiac))
+rysuj_makro_wykres(bezrobocie_ts, "Procentowa stopa bezrobocia", "% stopa bezrobocia", FORMAT)
 ```
+
 
 ::: {.content-visible when-format="pdf"}
 
