@@ -19,6 +19,8 @@ format:
       light: [flatly,arrow]
       dark: [darkly,dark]
     toc: true
+    toc-depth: 5
+    toc-expand: 5
     embed-resources: true
     respect-user-color-scheme: true
     include-in-header:
@@ -98,6 +100,8 @@ if (!require("tseries")) install.packages("tseries")
 library(tseries)
 if (!require("highcharter")) install.packages("highcharter")
 library("highcharter")
+if (!require("forecast")) install.packages("forecast")
+library(forecast)
 
 options(highcharter.lang = list(
     months = c("Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec", 
@@ -276,7 +280,7 @@ cat(sprintf(
 }
 
 cat(sprintf(
-  "Dane giełdowe PZU obejmują zakres od %s do %s o częstotliwości: dzienne",
+  "Dane giełdowe PZU obejmują zakres od %s do %s o częstotliwości: dzienne.",
             as.character(index(first(pzu_raw))), 
             as.character(index(last(pzu_raw)))), "\n")
 zbadaj_daty(pkb_ts)
@@ -383,7 +387,7 @@ if (FORMAT == "html") {
   )
 
   highchart() |>
-    hc_title(text = "Model naiwny – predykcja vs rzeczywistość (zbiór testowy)") |>
+    hc_title(text = "Model naiwny - predykcja vs rzeczywistość (zbiór testowy)") |>
     hc_xAxis(type = "datetime") |>
     hc_yAxis_multiples(
       list(title = list(text = "Cena zamknięcia (zł)"), opposite = FALSE, 
@@ -463,13 +467,13 @@ metryki_naiwny
 
 **Metryki:**
 
- - MAE = 0.59 zł - średnio model myli się o niecałe 60 groszy,
+ - MAE = 0.59 zł - średnio model myli się o 60 groszy,
  - RMSE = 0.85 zł - większy od MAE, zdarzają się pojedyncze dni z większymi skokami (RMSE karze mocniej za duże błędy),
  - MAPE = 1.25% - procentowo błąd jest bardzo mały. Przy cenie akcji z zakresu 40–60 zł pomyłka o 1.25% to właśnie około 60 groszy.
  
 **Wykres:**
 
-Linia błędu oscyluje blisko zera przez większość okresu, co potwierdza, że ceny PZU zmieniają się powoli i model naiwny dobrze to wykorzystuje. Widoczny jest jeden wyraźny skok błędu w okolicach 17 września 2024 (ok. -10 zł). Okazuje się, że to był [dzień wypłat dywidend](https://strefainwestorow.pl/notowania/spolki/PLPZU0000011/dywidendy) dla tej spółki, czego model nie mógł przewidzieć.
+Linia błędu oscyluje blisko zera przez większość okresu, co potwierdza, że ceny PZU zmieniają się powoli i model naiwny dobrze to wykorzystuje. Widoczny jest jeden wyraźny skok błędu 17 września 2024 (ok. -10 zł). Okazuje się, że to był [dzień wypłat dywidend](https://strefainwestorow.pl/notowania/spolki/PLPZU0000011/dywidendy) dla tej spółki, czego model nie mógł przewidzieć.
 
 ## Model ARIMA
 
