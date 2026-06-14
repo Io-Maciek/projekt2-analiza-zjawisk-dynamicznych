@@ -80,11 +80,7 @@ lang: pl
 
 W tej części ładowane są biblioteki oraz inicjalizowane są zmienne.
 
-Zmienna $FORMAT$ jest flagą, która wskazuje jaki silnik został wykorzystany
-podczas renderowania. Wykorzystane jest to podczas tworzenia wykresów. Język
-R wtedy decyduje, czy wyrenderować wersję internetową (HTML: grafy 
-interaktywne, zmieniające kolor w zależności od motywu), 
-lub dokumentową (PDF: stałe zdjęcia).
+Zmienna $FORMAT$ jest flagą, która wskazuje jaki silnik został wykorzystany podczas renderowania. Wykorzystane jest to podczas tworzenia wykresów. Język R wtedy decyduje, czy wyrenderować wersję internetową (HTML: grafy interaktywne, zmieniające kolor w zależności od motywu), lub dokumentową (PDF: stałe zdjęcia).
 
 ```{r}
 #| code-fold: TRUE
@@ -100,9 +96,9 @@ if (!require("readxl")) install.packages("readxl")
 library(readxl)
 if (!require("tseries")) install.packages("tseries")
 library(tseries)
-
 if (!require("highcharter")) install.packages("highcharter")
 library("highcharter")
+
 options(highcharter.lang = list(
     months = c("Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec", 
                "Lipiec", "Sierpień", "Wrzesień", "Październik", 
@@ -125,7 +121,6 @@ if (is.null(FORMAT)) {
 }
 ```
 
-
 ```{r}
 rysuj_rdzen <- function(dane_ts, tytul, etykieta_y, kolory) {
   plot(dane_ts, xlab = "Rok", ylab = etykieta_y, 
@@ -145,8 +140,11 @@ rysuj_rdzen <- function(dane_ts, tytul, etykieta_y, kolory) {
 rysuj_makro_wykres <- function(dane_ts, tytul, etykieta_y, format = "pdf") {
   # Zawsze: jasna
   jasne_kolory <- list(linia = "royalblue", siatka = "#cccccc")
-  par(bg = "white", col.axis = "black", col.lab = "black", col.main = "black", fg = "black")
-  rysuj_rdzen(dane_ts, ifelse(format == "html", tytul, ""), etykieta_y, jasne_kolory)
+  par(bg = "white", col.axis = "black", col.lab = "black", 
+      col.main = "black", fg = "black")
+  rysuj_rdzen(dane_ts, ifelse(format == "html", tytul, ""),
+              
+              etykieta_y, jasne_kolory)
   
   # HTML: rysujemy też wersję ciemną
   if (format == "html") {
@@ -156,35 +154,23 @@ rysuj_makro_wykres <- function(dane_ts, tytul, etykieta_y, format = "pdf") {
     rysuj_rdzen(dane_ts, tytul, etykieta_y, ciemne_kolory)
     
     # Reset po HTML
-    par(bg = "white", col.axis = "black", col.lab = "black", col.main = "black", fg = "black")
+    par(bg = "white", col.axis = "black", col.lab = "black", 
+        col.main = "black", fg = "black")
   }
 }
 ```
 
-
-
-
 # Wstęp
 
-## Cel
-W tym projekcie porównamy różne metody predykcji akcji giełdowych spółki 
-**PZU** (Powszechny Zakład Ubezpieczeń S.A.) oraz zbadamy wpływ dodania innych
-zmiennych na jakość danych wyjściowych.
+## Cel {#cel}
 
-Badanie rozpocznie się od stworzenia modelu naiwnego (bazowego), do którego
-porównywać się będą inne metryki. Model ten będzie zakładał, że 
-$$
-\text{predykowana cena} = \text{cena wczorajsza}
-$$
-Następnie zostana wykorzystane bardziej złożone funkcje jak $VAR$ czy $ARIMAX$
-(*przez autoarime*), do których później dodatkowo zostaną dołożone kolejne
-wymiary (np. dane o inflacji, stopie bezrobocia czy PKB) aby zweryfikować
-wpływ danych makroekonomicznych.
+W tym projekcie porównamy różne metody predykcji akcji giełdowych spółki **PZU** (Powszechny Zakład Ubezpieczeń S.A.) oraz zbadamy wpływ dodania innych zmiennych na jakość danych wyjściowych.
+
+Badanie rozpocznie się od stworzenia modelu naiwnego (bazowego), do którego porównywać się będą inne metryki. Model ten będzie zakładał, że $$\text{predykowana cena} = \text{cena wczorajsza}$$ Następnie zostana wykorzystane bardziej złożone funkcje jak $VAR$ czy $ARIMAX$ (*przez autoarime*), do których później dodatkowo zostaną dołożone kolejne wymiary (np. dane o inflacji, stopie bezrobocia czy PKB) aby zweryfikować wpływ danych makroekonomicznych.
 
 ## Dane
 
-Dane giełdowe pobrane zostaną pobrane z biblioteki **quantmod** poprzez API
-Yahoo Finance do GPW (Giełdy Papierów Wartościowych).
+Dane giełdowe pobrane zostaną pobrane z biblioteki **quantmod** poprzez API Yahoo Finance do GPW (Giełdy Papierów Wartościowych).
 
 ### Giełda PZU
 
@@ -214,18 +200,13 @@ if(FORMAT == "html"){
 
 ### Wskaźniki makroekonomiczne
 
-Wskaźniki makroekonomiczne zostały pobrane ze strony **GUS** 
-(Główny Urząd Statystyczny) 
-i pliku **Kwartalne wskaźniki makroekonomiczne** lub 
-**Wybrane miesięczne wskaźniki makroekonomiczne** [(@gus_wskazniki_2026)]{.content-visible when-format="pdf"}.
+Wskaźniki makroekonomiczne zostały pobrane ze strony **GUS** (Główny Urząd Statystyczny) i pliku **Kwartalne wskaźniki makroekonomiczne** lub **Wybrane miesięczne wskaźniki makroekonomiczne** [(@gus_wskazniki_2026)]{.content-visible when-format="pdf"}.
 
- - PKB pobrano z danych kwartalnych z arkusza **RACHUNKI NARODOWE**.
- - Inflacje pobrano z danych miesięcznych z arkusza **WSKAŹNIKI CEN**.
- - Procentową stopę bezrobocia pobrano z danych miesięcznych z arkusza 
- **RYNEK PRACY**.
- 
-Te dane zostały następnie przerobione ręcznie do pliku **makro.xlsx** do 
-arkuszy o odpowiednich nazwach.
+- PKB pobrano z danych kwartalnych z arkusza **RACHUNKI NARODOWE**.
+- Inflacje pobrano z danych miesięcznych z arkusza **WSKAŹNIKI CEN**.
+- Procentową stopę bezrobocia pobrano z danych miesięcznych z arkusza **RYNEK PRACY**.
+
+Te dane zostały następnie przerobione ręcznie do pliku **makro.xlsx** do arkuszy o odpowiednich nazwach.
 
 ```{r}
 #| fig-cap: !expr "if (knitr::is_latex_output()) 'Produkt Krajowy Brutto Polski' else NULL"
@@ -235,9 +216,12 @@ pkb_raw <- read_excel("makro.xlsx", sheet = "PKB")
 rok<-as.numeric(format( min(as.Date(pkb_raw$DATA)), "%Y"))
 kwartal<-(as.numeric(format( min(as.Date(pkb_raw$DATA)),"%m")) - 1) %/% 3 + 1
 
-makro_ts <- ts(as.numeric(as.character(pkb_raw$WARTOŚĆ)), frequency = 4, start = c(rok, kwartal))
-rysuj_makro_wykres(makro_ts/1000, "Produkt Krajowy Brutto Polski", "Wartość (mln zł)", FORMAT)
+pkb_ts <- ts(as.numeric(as.character(pkb_raw$WARTOŚĆ)), 
+             frequency = 4, start = c(rok, kwartal))
+rysuj_makro_wykres(pkb_ts/1000, "Produkt Krajowy Brutto Polski", 
+                   "Wartość (mln zł)", FORMAT)
 ```
+
 ```{r}
 #| fig-cap: !expr "if (knitr::is_latex_output()) 'Inflacja' else NULL"
 #| renderings: [light, dark]
@@ -246,10 +230,10 @@ inflacja_raw <- read_excel("makro.xlsx", sheet = "Inflacja")
 rok<-as.numeric(format( min(as.Date(inflacja_raw$DATA)), "%Y"))
 miesiac<-as.numeric(format( min(as.Date(inflacja_raw$DATA)),"%m"))
 
-inflacja_ts <- ts(as.numeric(as.character(inflacja_raw$WARTOŚĆ)), frequency = 12, start = c(rok, miesiac))
+inflacja_ts <- ts(as.numeric(as.character(inflacja_raw$WARTOŚĆ)), 
+                  frequency = 12, start = c(rok, miesiac))
 rysuj_makro_wykres(inflacja_ts - 100, "Inflacja", "Inflacja %", FORMAT)
 ```
-
 
 ```{r}
 #| fig-cap: !expr "if (knitr::is_latex_output()) 'Procentowa stopa bezrobocia' else NULL"
@@ -257,17 +241,250 @@ rysuj_makro_wykres(inflacja_ts - 100, "Inflacja", "Inflacja %", FORMAT)
 bezrobocie_raw <- read_excel("makro.xlsx", sheet = "Bezrobocie%")
 
 rok<-as.numeric(format( min(as.Date(bezrobocie_raw$DATA)), "%Y"))
-miesiac<-(as.numeric(format( min(as.Date(bezrobocie_raw$DATA)),"%m")) - 1)
+miesiac<-(as.numeric(format( min(as.Date(bezrobocie_raw$DATA)),"%m")))
 
-bezrobocie_ts <- ts(as.numeric(as.character(bezrobocie_raw$WARTOŚĆ)), frequency = 12, start = c(rok, miesiac))
-rysuj_makro_wykres(bezrobocie_ts, "Procentowa stopa bezrobocia", "% stopa bezrobocia", FORMAT)
+bezrobocie_ts <- ts(as.numeric(as.character(bezrobocie_raw$WARTOŚĆ)), 
+                    frequency = 12, start = c(rok, miesiac))
+rysuj_makro_wykres(
+  bezrobocie_ts, "Procentowa stopa bezrobocia", "% stopa bezrobocia", FORMAT)
+```
+
+## Wyznaczenie wspólnego zakresu dat
+
+Należy zbadać, czy wszystkie dane mają tą samą datę początkową i końcą. Jeżeli ich daty się różnią, należy skrócić wszystkie zbiory do największej z daty początkowych oraz najmniejszej z dat końcowych (biorąc pod uwagę różne częstotliwości).
+
+```{r}
+zbadaj_daty<-function(data_ts) {
+  min_data <- start(data_ts)
+  max_data <- end(data_ts)
+  freq <- frequency(data_ts)
+  
+  freq_name <- switch(as.character(freq),
+                      "1"  = "roczne",
+                      "4"  = "kwartalne",
+                      "12" = "miesięczne",
+                      "52" = "tygodniowe",
+                      "dzienne")
+
+
+cat(sprintf(
+  "Szereg czasowy '%s' trwa od %d-%02d do %d-%02d o częstotliwości: %s.",
+              deparse(substitute(data_ts)), 
+              min_data[1], min_data[2], 
+              max_data[1], max_data[2], 
+              freq_name), "\n")
+}
+
+cat(sprintf(
+  "Dane giełdowe PZU obejmują zakres od %s do %s o częstotliwości: dzienne",
+            as.character(index(first(pzu_raw))), 
+            as.character(index(last(pzu_raw)))), "\n")
+zbadaj_daty(pkb_ts)
+zbadaj_daty(bezrobocie_ts)
+zbadaj_daty(inflacja_ts)
+```
+
+Początki: 2010-05-11, 2009-01, 2010-01, 2010-01.
+
+- Najpóźniejszy start to **2010-05-11**. Ze względu na szereg kwartalny, musimy zaokrąglić to do najbliższego pełnego okresu: **2010-07-01** (początek trzeciego kwartału). 
+
+Końce: 2026-06-12, 2025-01, 2026-04, 2026-04.
+
+- Najwcześniejszy koniec to **2025-01**. Ze względu na to, że to szereg kwartalny, możemy brać daty aż do końca tego kwartału: **2025-03-31**.
+
+```{r}
+przytnij_dane <- function(data) {
+  start <- as.Date("2010-07-01")
+  end   <- as.Date("2025-03-31")
+  dane_xts <- as.xts(data)
+  index(dane_xts) <- as.Date(index(dane_xts))
+  window(dane_xts, start = start, end = end)
+}
+
+pkb_final        <- przytnij_dane(pkb_ts)
+bezrobocie_final <- przytnij_dane(bezrobocie_ts)
+inflacja_final   <- przytnij_dane(inflacja_ts)
+pzu_final        <- przytnij_dane(pzu_raw)
+```
+
+## Podział danych
+
+# Analiza i predykcja
+
+Ta częśc projektu zostanie pośwęcona ostatecznej prodekcji dziennych cen zamknięcia akcji spółki PZU wykorzystujac coraz to bardziej zaawansowane metody, by zweryfikować, które dane i jak najbardziej wpływają na jakoś danych wyjściowych. Zostanie zastosowana taka kolejność:
+
+1.  **Model naiwny/bazowy:** $\text{predykcja} = \text{wartość wczorajsza}$. Wykorzystane zostaną tylko dane z cen zamknięcia (jeden wymiar, jedna częstotliwość).
+2.  **Model ARIMA:** wykorzystana zostanie *autoarima* na cenach zamknięcia (jeden wymiar, jedna częstotliwość).
+3.  **Model VAR:** użyje funkcji *VAR* oraz pełnych danych giełdowych z cenami zamknięcia, wolumenem, cenami minimalnymi i maksymalnymi (kilka wymiarów, jedna częstotliwość).
+4.  **Model MIDASR A:** wykorzysta model [**midasr**](https://cran.r-project.org/web/packages/midasr/index.html) oraz **cen zamknięcia** akcji wraz z danymi makroekonomicznymi (kilka wymiarów, kilka częstotliwości).
+5.  **Model MIDASR B:** wykorzysta model [**midasr**](https://cran.r-project.org/web/packages/midasr/index.html) oraz **pełnych informacji giełdowych** wraz z danymi makroekonomicznymi (kilka wymiarów, kilka częstotliwości).
+
+Dodatkowo modele oparte na funkcji midasr rozbite zostały na dwie wersje: A, która korzysta tylko z jednego wymiaru danych giełdowych oraz B, który wykorzystuje je wszystkie. Pozwoli to dokładniej zbadać wartość dodaną innych wymiarów danych giełdowych na jakość wyników predykcji modelu.
+
+## Model naiwny
+
+Jak opisano we [wstępie](#cel), model naiwny (czy też bazowy) będzie zakładał, że $$\text{predykowana cena} = \text{cena wczorajsza}$$ Będzie to model jednowymiarowy, korzystający tylko z cen zamknięcia i posłuży jako baseline (wartość porównawcza) do predykcji z innych modeli.
+
+Dane zostają podzielone chronologicznie na trzy rozłączne zbiory:
+
+- **Treningowy (70%)** - estymacja modeli,
+- **Walidacyjny (20%)** - strojenie i porównanie modeli,
+- **Testowy (10%)** - ostateczna ocena jakości predykcji.
+
+```{r}
+pzu_close <- Cl(pzu_final)
+n <- nrow(pzu_close)
+
+n_train <- floor(0.70 * n)
+n_val   <- floor(0.20 * n)
+n_test  <- n - n_train - n_val
+
+pzu_train <- pzu_close[1:n_train, ]
+pzu_val   <- pzu_close[(n_train + 1):(n_train + n_val), ]
+pzu_test  <- pzu_close[(n_train + n_val + 1):n, ]
+
+cat(sprintf(
+  "Liczba obserwacji: %d
+    Treningowy  (70%%): %d  (%s - %s)
+    Walidacyjny (20%%): %d  (%s - %s)
+    Testowy     (10%%): %d  (%s - %s)\n",
+  n,
+  nrow(pzu_train), as.character(index(first(pzu_train))), 
+    as.character(index(last(pzu_train))),
+  nrow(pzu_val),   as.character(index(first(pzu_val))),   
+    as.character(index(last(pzu_val))),
+  nrow(pzu_test),  as.character(index(first(pzu_test))),  
+    as.character(index(last(pzu_test)))
+))
+```
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'Model naiwny - predykcja vs rzeczywistość (zbiór testowy)' else NULL"
+#| renderings: [light, dark]
+
+pzu_test_pred<-lag(pzu_close, k = 1)[(n_train + n_val + 1):n, ]
+pzu_test_real<-pzu_test
+e<-as.numeric(pzu_test_real) - as.numeric(pzu_test_pred)
+
+metryki_naiwny <- c(
+    MAE  = mean(abs(e)), 
+    RMSE = sqrt(mean(e^2)), 
+    MAPE = mean(abs(e / as.numeric(pzu_test_real))) * 100
+  )
+
+if (FORMAT == "html") {
+  # Wykres interaktywny HTML
+  
+  df_naiwny <- data.frame(
+    data        = index(pzu_test_real),
+    rzeczywiste = as.numeric(pzu_test_real),
+    predykcja   = as.numeric(pzu_test_pred),
+    blad        = e
+  )
+
+  highchart() |>
+    hc_title(text = "Model naiwny – predykcja vs rzeczywistość (zbiór testowy)") |>
+    hc_xAxis(type = "datetime") |>
+    hc_yAxis_multiples(
+      list(title = list(text = "Cena zamknięcia (zł)"), opposite = FALSE, 
+           min = 37, max = 60, startOnTick = FALSE, endOnTick = FALSE),
+      list(title = list(text = "Błąd (zł)"), opposite = TRUE, gridLineWidth = 0, 
+           min = -10, max = 4, startOnTick = FALSE, endOnTick = FALSE)
+    ) |>
+    
+    hc_add_series(
+      data = list_parse2(data.frame(
+        x = as.numeric(as.POSIXct(df_naiwny$data)) * 1000,
+        y = df_naiwny$rzeczywiste
+      )),
+      type = "line", name = "Rzeczywista", color = "#2196F3", yAxis = 0
+    ) |>
+    
+    hc_add_series(
+      data = list_parse2(data.frame(
+        x = as.numeric(as.POSIXct(df_naiwny$data)) * 1000,
+        y = df_naiwny$predykcja
+      )),
+      type = "line", name = "Predykcja (naiwna)", color = "#FF9800",
+      dashStyle = "ShortDash", yAxis = 0
+    ) |>
+    
+    hc_add_series(
+      data = list_parse2(data.frame(
+        x = as.numeric(as.POSIXct(df_naiwny$data)) * 1000,
+        y = df_naiwny$blad
+      )),
+      type = "line", name = "Błąd", color = "rgba(229, 57, 53, 0.5)",
+      dashStyle = "Solid", yAxis = 1
+    ) |>
+    
+    hc_tooltip(valueDecimals = 2, valueSuffix = " zł", shared = TRUE) |>
+    hc_legend(enabled = TRUE) |>
+    hc_rangeSelector(enabled = TRUE) |>
+    hc_scrollbar(enabled = TRUE)
+  
+} else {
+  # wykres statyczny dla PDF
+  
+  blad <- e
+  daty <- index(pzu_test_real)
+
+  par(bg = "white", col.axis = "black", 
+      col.lab = "black", col.main = "black", fg = "black"
+  )
+  plot(daty, as.numeric(pzu_test_real),
+       type = "l", col = "royalblue", lwd = 2,
+       xlab = "Data", ylab = "Cena zamknięcia (zł)"
+  )
+  lines(daty, as.numeric(pzu_test_pred), 
+        col = "tomato", lwd = 2, lty = 2
+  )
+  grid(col = "#cccccc")
+
+  # oś Y dla błędu
+  par(new = TRUE)
+  plot(daty, blad,
+     type = "l", col = adjustcolor("red3", alpha.f = 0.5), 
+     lwd = 1.5, lty = 1,
+     axes = FALSE, xlab = "", ylab = ""
+  )
+  axis(4, col = "red3", col.axis = "red3")
+  mtext("Błąd (zł)", side = 4, line = 3, col = "red3")
+
+  legend("topleft",
+         legend = c("Rzeczywista", "Predykcja (naiwna)", "Błąd"),
+         col    = c("royalblue", "tomato", "red3"),
+         lty    = c(1, 2, 1), lwd = 2, bty = "n")
+}
+
+metryki_naiwny
 ```
 
 
+**Metryki:**
+
+ - MAE = 0.59 zł - średnio model myli się o niecałe 60 groszy,
+ - RMSE = 0.85 zł - większy od MAE, zdarzają się pojedyncze dni z większymi skokami (RMSE karze mocniej za duże błędy),
+ - MAPE = 1.25% - procentowo błąd jest bardzo mały. Przy cenie akcji z zakresu 40–60 zł pomyłka o 1.25% to właśnie około 60 groszy.
+ 
+**Wykres:**
+
+Linia błędu oscyluje blisko zera przez większość okresu, co potwierdza, że ceny PZU zmieniają się powoli i model naiwny dobrze to wykorzystuje. Widoczny jest jeden wyraźny skok błędu w okolicach 17 września 2024 (ok. -10 zł). Okazuje się, że to był [dzień wypłat dywidend](https://strefainwestorow.pl/notowania/spolki/PLPZU0000011/dywidendy) dla tej spółki, czego model nie mógł przewidzieć.
+
+## Model ARIMA
+
+## Model VAR
+
+## Model MIDASR (A)
+
+## Model MIDASR (B)
+
+# Wyniki
+
+# Wnioski i podsumowanie
+
 ::: {.content-visible when-format="pdf"}
-
 # Bibliografia {.unnumbered}
-
 :::
 
 ::: {#refs}
