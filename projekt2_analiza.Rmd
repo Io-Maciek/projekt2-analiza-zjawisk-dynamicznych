@@ -102,6 +102,8 @@ if (!require("highcharter")) install.packages("highcharter")
 library("highcharter")
 if (!require("forecast")) install.packages("forecast")
 library(forecast)
+if (!require("midasr")) install.packages("midasr")
+library(midasr)
 
 options(highcharter.lang = list(
     months = c("Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec", 
@@ -330,7 +332,6 @@ inflacja_final   <- przytnij_dane(inflacja_ts)
 pzu_final        <- przytnij_dane(pzu_raw)
 ```
 
-## Podział danych
 
 # Analiza i predykcja
 
@@ -338,11 +339,8 @@ Ta częśc projektu zostanie pośwęcona ostatecznej prodekcji dziennych cen zam
 
 1.  **Model naiwny/bazowy:** $\text{predykcja} = \text{wartość wczorajsza}$. Wykorzystane zostaną tylko dane z cen zamknięcia (jeden wymiar, jedna częstotliwość).
 2.  **Model ARIMA:** wykorzystana zostanie *autoarima* na cenach zamknięcia (jeden wymiar, jedna częstotliwość).
-3.  **Model VAR:** użyje funkcji *VAR* oraz pełnych danych giełdowych z cenami zamknięcia, wolumenem, cenami minimalnymi i maksymalnymi (kilka wymiarów, jedna częstotliwość).
-4.  **Model MIDASR A:** wykorzysta model [**midasr**](https://cran.r-project.org/web/packages/midasr/index.html) oraz **cen zamknięcia** akcji wraz z danymi makroekonomicznymi (kilka wymiarów, kilka częstotliwości).
-5.  **Model MIDASR B:** wykorzysta model [**midasr**](https://cran.r-project.org/web/packages/midasr/index.html) oraz **pełnych informacji giełdowych** wraz z danymi makroekonomicznymi (kilka wymiarów, kilka częstotliwości).
-
-Dodatkowo modele oparte na funkcji midasr rozbite zostały na dwie wersje: A, która korzysta tylko z jednego wymiaru danych giełdowych oraz B, który wykorzystuje je wszystkie. Pozwoli to dokładniej zbadać wartość dodaną innych wymiarów danych giełdowych na jakość wyników predykcji modelu.
+3.  **Model VAR A:** użyje funkcji *VAR* oraz pełnych danych giełdowych z cenami zamknięcia, wolumenem, cenami minimalnymi i maksymalnymi (kilka wymiarów, jedna częstotliwość).
+4.  **Model VAR B:** do danych z **VAR A** dołożone zostaną dane makroekonomiczne (kilka wymiarów, jedna częstotliwość).
 
 ## Model naiwny
 
@@ -383,6 +381,7 @@ cat(sprintf(
     as.character(index(last(pzu_test)))
 ))
 ```
+
 
 ```{r}
 #| fig-cap: !expr "if (knitr::is_latex_output()) 'Model naiwny - predykcja vs rzeczywistość (zbiór testowy)' else NULL"
@@ -501,11 +500,93 @@ Linia błędu oscyluje blisko zera przez większość okresu, co potwierdza, że
 
 ## Model ARIMA
 
-## Model VAR
+## Model VAR (A)
 
-## Model MIDASR (A)
+## Model VAR (B)
 
-## Model MIDASR (B)
+
+```{r}
+# Autor: Maciej Kuchcik
+
+# dzielimy na 70-20-10 po najmniejszej 
+#  częstotliwości (tutaj są to kwartały):
+# 100% - 2010-07-01 – 2025-03-31 -> 59 kwartałów
+# 70% ~ 41 kwartałów -> do 2020-09-30
+# 20% ~ 12 kwartałów -> do 2023-09-30
+# 10% ~  6 kwartałów -> do końca (2025-03-31)
+
+
+index <- index(pzu_final)
+
+# podzial
+## dzienne (pzu)
+#data_train_end <- as.Date("2020-09-30")
+#data_val_end   <- as.Date("2023-09-30")
+#pzu_m_train <- window(pzu_final, end   = data_train_end)
+#pzu_m_val   <- window(pzu_final, start = data_train_end + 1, end = data_val_end)
+#pzu_m_test  <- window(pzu_final, start = data_val_end   + 1)
+
+synchronizuj_z_gielda <- function(macro_xts, target_index) {
+  # 1. merge z pustym (aby zachowac ilosc)
+  # 2. wypelniamy locf, zeby zachowac ostatnia wartosc
+  # 3. filtrjemy przez target (dni w gieldzie-nie dziala np w weekendy)
+  return(na.locf(merge(macro_xts, xts(order.by = target_index)))[target_index])
+}
+
+pkb_daily        <- synchronizuj_z_gielda(pkb_final, index)
+bezrobocie_daily <- synchronizuj_z_gielda(bezrobocie_final, index)
+inflacja_daily   <- synchronizuj_z_gielda(inflacja_final, index)
+# pzu_final
+
+c(nrow(pkb_daily), nrow(bezrobocie_daily), 
+  nrow(inflacja_daily), nrow(pzu_final))
+```
+
+```{r}
+all_data <- merge(pzu_final, pkb_daily, bezrobocie_daily, inflacja_daily)
+names(all_data) <- c("PZU.WA.Open", "PZU.WA.High", "PZU.WA.Low", 
+                     "PZU.WA.Close", "PZU.WA.Volume", "PZU.WA.Adjusted", 
+                     "PKB", "Bezrobocie","Inflacja")
+all_data
+```
+
+```{r}
+
+sprawdz_stacjonarnosc <- function(series) {
+  test_wynik <- adf.test(series, alternative = "stationary")
+  cat("Szereg:", deparse(substitute(series)), "\n")
+  cat("P-value:", test_wynik$p.value, "\n")
+  
+  if(test_wynik$p.value < 0.05) {
+    cat("Wniosek: Szereg jest STACJONARNY (odrzucamy hipotezę o pierwiastku jednostkowym).\n\n")
+  } else {
+    cat("Wniosek: Szereg NIE jest stacjonarny (brak podstaw do odrzucenia hipotezy).\n\n")
+  }
+}
+
+# Sprawdzenie Twoich zmiennych (używając all_data z poprzedniego kroku)
+sprawdz_stacjonarnosc(na.omit(all_data$PZU.WA.Close))
+sprawdz_stacjonarnosc(na.omit(all_data$PKB))
+# sprawdz_stacjonarnosc(na.omit(all_data$Inflacja))
+```
+
+```{r}
+
+pzu_ret <- diff(log(all_data$PZU.WA.Close))
+
+# 2. PKB -> Procentowa zmiana kwartalna (lub różnice w logarytmach)
+pkb_diff <- diff(log(all_data$PKB))
+
+# 3. Inflacja i Bezrobocie -> Zazwyczaj wystarczy zwykła różnica (diff)
+inflacja_diff <- diff(all_data$Inflacja)
+bezrobocie_diff <- diff(all_data$Bezrobocie)
+
+
+sprawdz_stacjonarnosc(na.omit(pzu_ret))
+sprawdz_stacjonarnosc(na.omit(pkb_diff))
+sprawdz_stacjonarnosc(na.omit(inflacja_diff))
+sprawdz_stacjonarnosc(na.omit(bezrobocie_diff))
+```
 
 # Wyniki
 
