@@ -126,6 +126,7 @@ if (is.null(FORMAT)) {
 ```
 
 ```{r}
+#| code-summary: "Funkcja 'rysuj_rdzen'"
 rysuj_rdzen <- function(dane_ts, tytul, etykieta_y, kolory) {
   plot(dane_ts, xlab = "Rok", ylab = etykieta_y, 
        main = tytul, col = kolory$linia, lwd = 2)
@@ -181,6 +182,9 @@ Dane giełdowe pobrane zostaną pobrane z biblioteki **quantmod** poprzez API Ya
 ```{r}
 #| fig-cap: !expr "if (knitr::is_latex_output()) 'Wykres akcji spółki PZU' else NULL"
 #| renderings: [light, dark]
+#| code-summary: "Pobranie danych giełdowych"
+# Autor: Maciej Kuchcik
+
 pzu_raw<-getSymbols("PZU.WA", auto.assign = F)
 
 if(FORMAT == "html"){
@@ -215,6 +219,9 @@ Te dane zostały następnie przerobione ręcznie do pliku **makro.xlsx** do arku
 ```{r}
 #| fig-cap: !expr "if (knitr::is_latex_output()) 'Produkt Krajowy Brutto Polski' else NULL"
 #| renderings: [light, dark]
+#| code-summary: "Pobranie danych o PKB"
+# Autor: Maciej Kuchcik
+
 pkb_raw <- read_excel("makro.xlsx", sheet = "PKB")
 
 rok<-as.numeric(format( min(as.Date(pkb_raw$DATA)), "%Y"))
@@ -229,6 +236,9 @@ rysuj_makro_wykres(pkb_ts/1000, "Produkt Krajowy Brutto Polski",
 ```{r}
 #| fig-cap: !expr "if (knitr::is_latex_output()) 'Inflacja' else NULL"
 #| renderings: [light, dark]
+#| code-summary: "Pobranie danych o inflacji"
+# Autor: Maciej Kuchcik
+
 inflacja_raw <- read_excel("makro.xlsx", sheet = "Inflacja")
 
 rok<-as.numeric(format( min(as.Date(inflacja_raw$DATA)), "%Y"))
@@ -242,6 +252,9 @@ rysuj_makro_wykres(inflacja_ts - 100, "Inflacja", "Inflacja %", FORMAT)
 ```{r}
 #| fig-cap: !expr "if (knitr::is_latex_output()) 'Procentowa stopa bezrobocia' else NULL"
 #| renderings: [light, dark]
+#| code-summary: "Pobranie danych o stopie bezrobocia"
+# Autor: Maciej Kuchcik
+
 bezrobocie_raw <- read_excel("makro.xlsx", sheet = "Bezrobocie%")
 
 rok<-as.numeric(format( min(as.Date(bezrobocie_raw$DATA)), "%Y"))
@@ -258,6 +271,9 @@ rysuj_makro_wykres(
 Należy zbadać, czy wszystkie dane mają tą samą datę początkową i końcą. Jeżeli ich daty się różnią, należy skrócić wszystkie zbiory do największej z daty początkowych oraz najmniejszej z dat końcowych (biorąc pod uwagę różne częstotliwości).
 
 ```{r}
+#| code-summary: "Analiza zakresów dat"
+# Autor: Maciej Kuchcik
+
 zbadaj_daty<-function(data_ts) {
   min_data <- start(data_ts)
   max_data <- end(data_ts)
@@ -297,6 +313,9 @@ Końce: 2026-06-12, 2025-01, 2026-04, 2026-04.
 - Najwcześniejszy koniec to **2025-01**. Ze względu na to, że to szereg kwartalny, możemy brać daty aż do końca tego kwartału: **2025-03-31**.
 
 ```{r}
+#| code-summary: "Wyfiltrowanie danych do dat"
+# Autor: Maciej Kuchcik
+
 przytnij_dane <- function(data) {
   start <- as.Date("2010-07-01")
   end   <- as.Date("2025-03-31")
@@ -336,6 +355,9 @@ Dane zostają podzielone chronologicznie na trzy rozłączne zbiory:
 - **Testowy (10%)** - ostateczna ocena jakości predykcji.
 
 ```{r}
+#| code-summary: "Podział danych 70-20-10"
+# Autor: Maciej Kuchcik
+
 pzu_close <- Cl(pzu_final)
 n <- nrow(pzu_close)
 
@@ -365,6 +387,8 @@ cat(sprintf(
 ```{r}
 #| fig-cap: !expr "if (knitr::is_latex_output()) 'Model naiwny - predykcja vs rzeczywistość (zbiór testowy)' else NULL"
 #| renderings: [light, dark]
+#| code-summary: "Wykres predykcji i błędów"
+# Autor: Maciej Kuchcik
 
 pzu_test_pred<-lag(pzu_close, k = 1)[(n_train + n_val + 1):n, ]
 pzu_test_real<-pzu_test
@@ -493,6 +517,7 @@ Linia błędu oscyluje blisko zera przez większość okresu, co potwierdza, że
 
 ::: {#refs}
 :::
+
 
 ```{=latex}
 \renewcommand{\listfigurename}{Spis rysunków}
