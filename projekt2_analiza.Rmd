@@ -102,8 +102,10 @@ if (!require("highcharter")) install.packages("highcharter")
 library("highcharter")
 if (!require("forecast")) install.packages("forecast")
 library(forecast)
-if (!require("midasr")) install.packages("midasr")
-library(midasr)
+#if (!require("midasr")) install.packages("midasr")
+#library(midasr)
+if (!require("vars")) install.packages("vars")
+library(vars)
 
 options(highcharter.lang = list(
     months = c("Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec", 
@@ -332,6 +334,75 @@ inflacja_final   <- przytnij_dane(inflacja_ts)
 pzu_final        <- przytnij_dane(pzu_raw)
 ```
 
+## Synchronizacja danych
+```{r}
+#| code-summary: "Synchronizacja danych"
+# Autor: Maciej Kuchcik
+
+synchronizuj_z_gielda <- function(macro_xts, target_index) {
+  # 1. merge z pustym (aby zachowac ilosc)
+  # 2. wypelniamy locf, zeby zachowac ostatnia wartosc
+  # 3. filtrjemy przez target (dni w gieldzie-nie dziala np w weekendy)
+  return(na.locf(merge(macro_xts, xts(order.by = target_index)))[target_index])
+}
+index <- index(pzu_final)
+
+pkb_daily        <- synchronizuj_z_gielda(pkb_final, index)
+bezrobocie_daily <- synchronizuj_z_gielda(bezrobocie_final, index)
+inflacja_daily   <- synchronizuj_z_gielda(inflacja_final, index)
+
+c(nrow(pkb_daily), nrow(bezrobocie_daily), 
+  nrow(inflacja_daily), nrow(pzu_final))
+```
+
+```{r}
+#| code-summary: "Stworzenie wspólnej kolekcji"
+# Autor: Maciej Kuchcik
+
+all_data <- merge(pzu_final, pkb_daily, bezrobocie_daily, inflacja_daily)
+names(all_data) <- c("PZU.WA.Open", "PZU.WA.High", "PZU.WA.Low", 
+                     "PZU.WA.Close", "PZU.WA.Volume", "PZU.WA.Adjusted", 
+                     "PKB", "Bezrobocie","Inflacja")
+class(all_data)
+head(all_data)
+```
+
+## Podział danych na zbiory treningowe, walidacyjne i testowe
+
+Dane zostają podzielone chronologicznie na trzy rozłączne zbiory:
+
+- **Treningowy (70%)** - estymacja modeli,
+- **Walidacyjny (20%)** - strojenie i porównanie modeli,
+- **Testowy (10%)** - ostateczna ocena jakości predykcji.
+
+```{r}
+#| code-summary: "Podział danych na 70-20-10%"
+# Autor: Maciej Kuchcik
+
+n <- nrow(all_data)
+
+n_train <- floor(0.70 * n)
+n_val   <- floor(0.20 * n)
+n_test  <- n - n_train - n_val
+
+all_data_train <- all_data[1:n_train, ]
+all_data_val   <- all_data[(n_train + 1):(n_train + n_val), ]
+all_data_test  <- all_data[(n_train + n_val + 1):n, ]
+
+cat(sprintf(
+  "Liczba obserwacji: %d
+    Treningowy  (70%%): %d  (%s - %s)
+    Walidacyjny (20%%): %d  (%s - %s)
+    Testowy     (10%%): %d  (%s - %s)\n",
+  n,
+  nrow(all_data_train), as.character(index(first(all_data_train))), 
+    as.character(index(last(all_data_train))),
+  nrow(all_data_val),   as.character(index(first(all_data_val))),   
+    as.character(index(last(all_data_val))),
+  nrow(all_data_test),  as.character(index(first(all_data_test))),  
+    as.character(index(last(all_data_test)))
+))
+```
 
 # Analiza i predykcja
 
@@ -346,50 +417,17 @@ Ta częśc projektu zostanie pośwęcona ostatecznej prodekcji dziennych cen zam
 
 Jak opisano we [wstępie](#cel), model naiwny (czy też bazowy) będzie zakładał, że $$\text{predykowana cena} = \text{cena wczorajsza}$$ Będzie to model jednowymiarowy, korzystający tylko z cen zamknięcia i posłuży jako baseline (wartość porównawcza) do predykcji z innych modeli.
 
-Dane zostają podzielone chronologicznie na trzy rozłączne zbiory:
-
-- **Treningowy (70%)** - estymacja modeli,
-- **Walidacyjny (20%)** - strojenie i porównanie modeli,
-- **Testowy (10%)** - ostateczna ocena jakości predykcji.
-
-```{r}
-#| code-summary: "Podział danych 70-20-10"
-# Autor: Maciej Kuchcik
-
-pzu_close <- Cl(pzu_final)
-n <- nrow(pzu_close)
-
-n_train <- floor(0.70 * n)
-n_val   <- floor(0.20 * n)
-n_test  <- n - n_train - n_val
-
-pzu_train <- pzu_close[1:n_train, ]
-pzu_val   <- pzu_close[(n_train + 1):(n_train + n_val), ]
-pzu_test  <- pzu_close[(n_train + n_val + 1):n, ]
-
-cat(sprintf(
-  "Liczba obserwacji: %d
-    Treningowy  (70%%): %d  (%s - %s)
-    Walidacyjny (20%%): %d  (%s - %s)
-    Testowy     (10%%): %d  (%s - %s)\n",
-  n,
-  nrow(pzu_train), as.character(index(first(pzu_train))), 
-    as.character(index(last(pzu_train))),
-  nrow(pzu_val),   as.character(index(first(pzu_val))),   
-    as.character(index(last(pzu_val))),
-  nrow(pzu_test),  as.character(index(first(pzu_test))),  
-    as.character(index(last(pzu_test)))
-))
-```
-
-
 ```{r}
 #| fig-cap: !expr "if (knitr::is_latex_output()) 'Model naiwny - predykcja vs rzeczywistość (zbiór testowy)' else NULL"
 #| renderings: [light, dark]
 #| code-summary: "Wykres predykcji i błędów"
 # Autor: Maciej Kuchcik
 
-pzu_test_pred<-lag(pzu_close, k = 1)[(n_train + n_val + 1):n, ]
+pzu_train <- all_data_train$PZU.WA.Close
+pzu_val   <- all_data_val$PZU.WA.Close
+pzu_test  <- all_data_test$PZU.WA.Close
+
+pzu_test_pred<-lag(all_data$PZU.WA.Close, k = 1)[(n_train + n_val + 1):n, ]
 pzu_test_real<-pzu_test
 e<-as.numeric(pzu_test_real) - as.numeric(pzu_test_pred)
 
@@ -502,52 +540,200 @@ Linia błędu oscyluje blisko zera przez większość okresu, co potwierdza, że
 
 ## Model VAR (A)
 
+### Testy stacjonarności
+
+```{r}
+#| code-summary: "Testy stacjonarności"
+# Autor: Maciej Kuchcik
+
+czy_stacjonarny <- function(series, nazwa = deparse(substitute(series))) {
+  test_wynik <- suppressWarnings(adf.test(series))
+  p <- test_wynik$p.value
+  p_formatted <- if (p <= 0.01) "< 0.01" else formatC(p, digits = 4, format = "f")
+  
+  if (p < 0.05) {
+    cat(sprintf("%s jest STACJONARNY (%s).\n", nazwa, p_formatted))
+    return(1)
+  } else {
+    cat(sprintf("%s NIE jest stacjonarny (%s).\n", nazwa, p_formatted))
+    return(0)
+  }
+}
+
+sprawdz_wszystkie <- function(data) {
+  wyniki <- sapply(names(data), function(col) {
+    czy_stacjonarny(na.omit(data[, col]), nazwa = col)
+  })
+  return(wyniki)
+}
+
+sprawdz_wszystkie(all_data_train)
+```
+
+### Tworzenie modelu
+
+```{r}
+var_A  <- na.omit(merge(
+  zamkniecia    = diff(log(all_data_train$PZU.WA.Close)),
+  #volume   = all_data_train$PZU.WA.Volume,
+  pkb      = all_data_train$PKB,
+  bezrob   = diff(all_data_train$Bezrobocie),
+  inflacja = diff(all_data_train$Inflacja)
+))
+
+var_A_val <- na.omit(merge(
+  zamkniecia = diff(log(all_data_val$PZU.WA.Close)),
+  pkb        = all_data_val$PKB,
+  bezrob     = diff(all_data_val$Bezrobocie),
+  inflacja   = diff(all_data_val$Inflacja)
+))
+
+
+all(sprawdz_wszystkie(var_A) == 1)
+```
+
+### Predykcja
+
+```{r}
+var_select <- VARselect(var_A, lag.max = 10, type = "const")
+p_opt <- var_select$selection["AIC(n)"]
+cat("Optymalny rząd VAR (AIC):", p_opt, "\n")
+```
+
+```{r}
+model_var_A <- VAR(var_A, p = p_opt, type = "const")
+summary(model_var_A)
+```
+
+```{r}
+n_val     <- nrow(var_A_val)
+prognozy  <- numeric(n_val)
+```
+
+
+```{r}
+# Zwiększ liczbę historii startowej, jeśli p_opt jest duże
+historia_n <- p_opt + 5  # Zapewnij sobie mały zapas obserwacji
+historia <- tail(as.data.frame(var_A), historia_n)
+
+for (i in seq_len(n_val)) {
+  # Budowanie okna
+  dodatkowe_dane <- if(i > 1) as.data.frame(var_A_val)[seq_len(i - 1), , drop = FALSE] else NULL
+  okno <- rbind(historia, dodatkowe_dane)
+  
+  # Sprawdzenie czy mamy wystarczająco dużo danych
+  if (nrow(okno) > (p_opt + 1)) {
+    model_tmp <- VAR(okno, p = p_opt, type = "const")
+    pred      <- predict(model_tmp, n.ahead = 1)
+    prognozy[i] <- pred$fcst$PZU.WA.Close[1, "fcst"]
+  } else {
+    # Dla pierwszych kroków, gdzie danych jest za mało, 
+    # możesz przyjąć prognozę naiwną lub NA
+    prognozy[i] <- NA 
+  }
+}
+```
+
+```{r}
+rzeczywiste <- as.numeric(var_A_val$zamkniecia)
+e           <- rzeczywiste - prognozy
+
+metryki_var_A <- c(
+  MAE  = mean(abs(e)),
+  RMSE = sqrt(mean(e^2)),
+  MAPE = mean(abs(e / rzeczywiste)) * 100
+)
+cat("\nMetryki VAR(A) na zbiorze walidacyjnym:\n")
+print(metryki_var_A)
+
+```
+
+
+
+```{r}
+metryki_naiwny_val <- c(
+  MAE  = mean(abs(diff(as.numeric(all_data_val$PZU.WA.Close)))),
+  RMSE = sqrt(mean(diff(as.numeric(all_data_val$PZU.WA.Close))^2)),
+  MAPE = mean(abs(diff(as.numeric(all_data_val$PZU.WA.Close)) / 
+                    as.numeric(all_data_val$PZU.WA.Close[-1]))) * 100
+)
+cat("\nMetryki modelu naiwnego na zbiorze walidacyjnym:\n")
+print(metryki_naiwny_val)
+
+```
+
+```{r}
+daty_val <- index(var_A_val)
+
+if (FORMAT == "html") {
+  df_val <- data.frame(
+    x           = as.numeric(as.POSIXct(daty_val)) * 1000,
+    rzeczywiste = rzeczywiste,
+    prognoza    = prognozy,
+    blad        = e
+  )
+  
+  highchart() |>
+    hc_title(text = "VAR(A) — predykcja vs rzeczywistość (zbiór walidacyjny)") |>
+    hc_xAxis(type = "datetime") |>
+    hc_yAxis_multiples(
+      list(title = list(text = "Dzienna stopa zwrotu"), opposite = FALSE),
+      list(title = list(text = "Błąd"), opposite = TRUE, gridLineWidth = 0)
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_val$x, y = df_val$rzeczywiste)),
+      type = "line", name = "Rzeczywista", color = "#2196F3", yAxis = 0
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_val$x, y = df_val$prognoza)),
+      type = "line", name = "Prognoza VAR(A)", color = "#FF9800",
+      dashStyle = "ShortDash", yAxis = 0
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_val$x, y = df_val$blad)),
+      type = "line", name = "Błąd", color = "rgba(229,57,53,0.5)", yAxis = 1
+    ) |>
+    hc_tooltip(valueDecimals = 4, shared = TRUE) |>
+    hc_legend(enabled = TRUE) |>
+    hc_rangeSelector(enabled = TRUE) |>
+    hc_scrollbar(enabled = TRUE)
+  
+} else {
+  par(bg = "white", col.axis = "black", col.lab = "black",
+      col.main = "black", fg = "black")
+  
+  plot(daty_val, rzeczywiste,
+       type = "l", col = "royalblue", lwd = 1.5,
+       xlab = "Data", ylab = "Dzienna stopa zwrotu",
+       main = "VAR(A) — predykcja vs rzeczywistość")
+  lines(daty_val, prognozy, col = "tomato", lwd = 1.5, lty = 2)
+  grid(col = "#cccccc")
+  
+  par(new = TRUE)
+  plot(daty_val, e, type = "l",
+       col = adjustcolor("red3", alpha.f = 0.4), lwd = 1,
+       axes = FALSE, xlab = "", ylab = "")
+  axis(4, col = "red3", col.axis = "red3")
+  mtext("Błąd", side = 4, line = 3, col = "red3")
+  
+  legend("topleft",
+         legend = c("Rzeczywista", "Prognoza VAR(A)", "Błąd"),
+         col    = c("royalblue", "tomato", "red3"),
+         lty    = c(1, 2, 1), lwd = 2, bty = "n")
+}
+```
+
 ## Model VAR (B)
 
 
 ```{r}
 # Autor: Maciej Kuchcik
 
-# dzielimy na 70-20-10 po najmniejszej 
-#  częstotliwości (tutaj są to kwartały):
-# 100% - 2010-07-01 – 2025-03-31 -> 59 kwartałów
-# 70% ~ 41 kwartałów -> do 2020-09-30
-# 20% ~ 12 kwartałów -> do 2023-09-30
-# 10% ~  6 kwartałów -> do końca (2025-03-31)
 
-
-index <- index(pzu_final)
-
-# podzial
-## dzienne (pzu)
-#data_train_end <- as.Date("2020-09-30")
-#data_val_end   <- as.Date("2023-09-30")
-#pzu_m_train <- window(pzu_final, end   = data_train_end)
-#pzu_m_val   <- window(pzu_final, start = data_train_end + 1, end = data_val_end)
-#pzu_m_test  <- window(pzu_final, start = data_val_end   + 1)
-
-synchronizuj_z_gielda <- function(macro_xts, target_index) {
-  # 1. merge z pustym (aby zachowac ilosc)
-  # 2. wypelniamy locf, zeby zachowac ostatnia wartosc
-  # 3. filtrjemy przez target (dni w gieldzie-nie dziala np w weekendy)
-  return(na.locf(merge(macro_xts, xts(order.by = target_index)))[target_index])
-}
-
-pkb_daily        <- synchronizuj_z_gielda(pkb_final, index)
-bezrobocie_daily <- synchronizuj_z_gielda(bezrobocie_final, index)
-inflacja_daily   <- synchronizuj_z_gielda(inflacja_final, index)
-# pzu_final
-
-c(nrow(pkb_daily), nrow(bezrobocie_daily), 
-  nrow(inflacja_daily), nrow(pzu_final))
 ```
 
 ```{r}
-all_data <- merge(pzu_final, pkb_daily, bezrobocie_daily, inflacja_daily)
-names(all_data) <- c("PZU.WA.Open", "PZU.WA.High", "PZU.WA.Low", 
-                     "PZU.WA.Close", "PZU.WA.Volume", "PZU.WA.Adjusted", 
-                     "PKB", "Bezrobocie","Inflacja")
-all_data
+
 ```
 
 ```{r}
