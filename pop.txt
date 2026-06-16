@@ -1,0 +1,268 @@
+Krótka odpowiedź: to już jest zrobione — automatycznie. W modelu VAR nie dodaje się lagów ręcznie, bo cała istota VAR(p) polega na tym, że każda zmienna jest regresowana na p opóźnieniach wszystkich zmiennych, w tym swoich własnych.
+
+Gdzie to siedzi w kodzie
+Kiedy wołasz:
+
+
+model_var_A <- VAR(var_A, p = p_opt, type = "const")
+równanie dla zamkniecia ma postać:
+
+$$\text{zamkniecia}t = c + \sum{i=1}^{p}\big(a_i,\text{zamkniecia}{t-i} + b_i,\text{najwyzsze}{t-i} + c_i,\text{najnizsze}{t-i} + d_i,\text{wolumen}{t-i}\big) + \varepsilon_t$$
+
+Czyli zamkniecia.l1, zamkniecia.l2, …, zamkniecia.lp są już regresorami. Liczbę lagów wybiera za Ciebie:
+
+
+var_select <- VARselect(var_A, lag.max = 10, type = "const")
+p_opt <- var_select$selection["AIC(n)"]
+p_opt to dokładnie liczba opóźnień ceny (i pozostałych zmiennych), jaką dostaje model.
+
+Jak to sprawdzić u siebie
+Spójrz w summary(model_var_A) — w bloku „Estimation results for equation zamkniecia" zobaczysz współczynniki o nazwach zamkniecia.l1, zamkniecia.l2, … aż do .l{p_opt}. To są właśnie lagi cen zamknięcia użyte do nauki.
+
+Ważne zastrzeżenie
+To są lagi log-zwrotów (diff(log(close))), a nie surowej ceny — i tak ma być. Surowa cena jest niestacjonarna i nie wolno jej wkładać do VAR-a jako poziomu. Więc „lagi ceny zamknięcia" w sensie poprawnym = lagi zwrotów, i one już tam są.
+
+Kiedy musiałbyś coś dodać ręcznie
+Więcej lagów — podnieś lag.max albo ustaw p na sztywno (VAR(var_A, p = 5, ...)).
+Różna długość lagów dla różnych zmiennych (np. tylko cena z 5 lagami, reszta z 1) — VAR daje wspólne p, więc potrzebujesz restrykcji: restrict(model_var_A, method = "ser") albo method = "manual" z macierzą zer/jedynek.
+Gdybyś robił to NIE w VAR, tylko w ARIMAX/regresji — wtedy faktycznie tworzysz kolumny lagów ręcznie, np. xreg = cbind(l1 = stats::lag(ret, -1), l2 = stats::lag(ret, -2)) lub przez embed(). Ale w ARIMA własne opóźnienia AR też dochodzą automatycznie.
+Podsumowując: dla sekcji VAR nic nie musisz dodawać — VARselect + VAR(p = p_opt) już uczy model na lagach cen zamknięcia. Jedyne, co możesz chcieć, to świadomie wybrać/zwiększyć p albo nałożyć restrykcje, jeśli chcesz innej struktury opóźnień
+
+
+==============================================================================
+ POPRAWKI DO SEKCJI "Model VAR (A)" — projekt2_analiza.Rmd
+ Autor poprawek: Claude   |   Data: 2026-06-16
+==============================================================================
+
+CO ZOSTAŁO NAPRAWIONE
+---------------------
+1. BŁĄD BLOKUJĄCY: pred$fcst$PZU.WA.Close -> pred$fcst$zamkniecia
+   (kolumna w var_A nazywa się "zamkniecia", więc oryginał rzucał błąd
+   "incorrect number of dimensions").
+2. Prognoza rekursywna startuje teraz z CAŁEGO zbioru treningowego, a nie
+   z tail(var_A, p_opt+5) — wcześniej wyrzucało to prawie cały trening i
+   pierwsze iteracje miały za mało danych do estymacji VAR-a.
+3. Transformacje stacjonarne liczone są na PEŁNYM szeregu, a potem dzielone
+   na train/val — nie gubi się zwrotu na granicy train/val.
+4. Metryki VAR są ODTWARZANE DO POZIOMU CENY (zł):
+   cena_pred = cena_wczorajsza * exp(prognozowany_log_zwrot).
+   Dzięki temu MAE/RMSE/MAPE VAR-a są w tych samych jednostkach co model
+   naiwny i liczone na DOKŁADNIE tych samych datach -> porównanie jest uczciwe.
+   (MAPE liczone na cenie 40-60 zł, a nie na zwrotach bliskich zera.)
+5. VAR(A) jest teraz GIEŁDOWY (zamknięcie/max/min/wolumen) — zgodnie z opisem
+   w punkcie 3 sekcji "Analiza i predykcja". Dane makro przechodzą do VAR(B).
+
+DECYZJE / UWAGI
+---------------
+- Jeśli WOLAŁBYŚ zostawić makro w VAR(A): zróżnicuj PKB (diff(log(PKB))),
+  ale pamiętaj, że makro rozciągnięte przez na.locf do dziennej częstotliwości
+  ma diff = 0 przez prawie cały czas (martwy regresor). To problem mieszania
+  częstotliwości — dlatego sensowniej trzymać makro w osobnym modelu (VAR B).
+- diff(log(Volume+1)) używa +1 jako zabezpieczenia przed log(0).
+- n_val z podziału 70/20/10 NIE jest już nadpisywane; używam nazwy n_val_var.
+
+==============================================================================
+ ### Tworzenie modelu   ---  ZASTĄP CAŁY CHUNK (oryg. ~575-593)
+==============================================================================
+```{r}
+#| code-summary: "Budowa zmiennych stacjonarnych dla VAR(A)"
+# Autor: Maciej Kuchcik
+
+# Transformacje liczymy na PEŁNYM szeregu (to tylko transformacja punktowa,
+# bez przecieku informacji), a dopiero potem dzielimy na train/val.
+# Dzięki temu nie gubimy zwrotu na granicy train/val.
+ret_close <- diff(log(all_data$PZU.WA.Close))
+ret_high  <- diff(log(all_data$PZU.WA.High))
+ret_low   <- diff(log(all_data$PZU.WA.Low))
+ret_vol   <- diff(log(all_data$PZU.WA.Volume + 1))  # +1 chroni przed log(0)
+
+dane_var <- merge(
+  zamkniecia = ret_close,
+  najwyzsze  = ret_high,
+  najnizsze  = ret_low,
+  wolumen    = ret_vol
+)
+# usuwamy NA z różnicowania oraz ewentualne wartości niefinitowe
+dane_var <- dane_var[apply(dane_var, 1, function(r) all(is.finite(r))), ]
+
+# Podział wg tych samych granic dat co podział 70/20/10
+koniec_train <- end(all_data_train)
+koniec_val   <- end(all_data_val)
+
+var_A     <- dane_var[index(dane_var) <= koniec_train]
+var_A_val <- dane_var[index(dane_var) >  koniec_train &
+                      index(dane_var) <= koniec_val]
+
+# Wszystkie zmienne VAR(A) powinny być stacjonarne (zwroty/różnice logarytmów)
+stacjonarnosc_var_A <- sprawdz_wszystkie(var_A)
+if (!all(stacjonarnosc_var_A == 1)) {
+  warning("Uwaga: nie wszystkie zmienne VAR(A) wyszły stacjonarne w teście ADF.")
+}
+all(stacjonarnosc_var_A == 1)
+```
+
+==============================================================================
+ ### Predykcja — dobór rzędu p   ---  ZASTĄP CHUNK (oryg. ~597-601)
+==============================================================================
+```{r}
+#| code-summary: "Dobór optymalnego rzędu VAR"
+var_select <- VARselect(var_A, lag.max = 10, type = "const")
+p_opt <- as.integer(var_select$selection["AIC(n)"])
+cat("Optymalny rząd VAR (AIC):", p_opt, "\n")
+```
+
+==============================================================================
+ ### Model pełny (in-sample, do podglądu)  ---  ZASTĄP CHUNK (oryg. ~603-606)
+==============================================================================
+```{r}
+#| code-summary: "Estymacja VAR(A) na całym treningu"
+model_var_A <- VAR(var_A, p = p_opt, type = "const")
+summary(model_var_A)
+```
+
+==============================================================================
+ ### Inicjalizacja wektora prognoz  ---  ZASTĄP CHUNK (oryg. ~608-611)
+==============================================================================
+```{r}
+n_val_var <- nrow(var_A_val)   # NIE nadpisujemy globalnego n_val
+prognozy  <- numeric(n_val_var)
+```
+
+==============================================================================
+ ### Prognoza rekursywna 1-krok-naprzód  ---  ZASTĄP CHUNK (oryg. ~614-635)
+==============================================================================
+```{r}
+#| code-summary: "Rekursywna prognoza VAR(A) na zbiorze walidacyjnym"
+# Startujemy z PEŁNEGO treningu i rozszerzamy okno o kolejne zrealizowane
+# obserwacje walidacyjne (expanding window, recursive one-step-ahead).
+historia <- as.data.frame(var_A)
+
+for (i in seq_len(n_val_var)) {
+  dodatkowe_dane <- if (i > 1) {
+    as.data.frame(var_A_val)[seq_len(i - 1), , drop = FALSE]
+  } else NULL
+
+  okno <- rbind(historia, dodatkowe_dane)
+
+  model_tmp   <- VAR(okno, p = p_opt, type = "const")
+  pred        <- predict(model_tmp, n.ahead = 1)
+  prognozy[i] <- pred$fcst$zamkniecia[1, "fcst"]   # POPRAWIONA nazwa kolumny
+}
+```
+
+==============================================================================
+ ### Metryki — odtworzone do poziomu CENY (zł)  ---  ZASTĄP CHUNK (oryg. ~637-663)
+==============================================================================
+```{r}
+#| code-summary: "Metryki VAR(A) i naiwnego w zł (porównywalne)"
+daty_val  <- index(var_A_val)
+
+# Cena rzeczywista w dniu t oraz cena z dnia poprzedniego (t-1)
+cena_real <- as.numeric(all_data$PZU.WA.Close[daty_val])
+cena_prev <- as.numeric(lag(all_data$PZU.WA.Close, k = 1)[daty_val])
+
+# Prognoza ceny: wczorajsza cena * exp(prognozowany log-zwrot)
+cena_pred_var <- cena_prev * exp(prognozy)
+
+# Błędy w złotówkach
+e_var    <- cena_real - cena_pred_var
+e_naiwny <- cena_real - cena_prev   # model naiwny: predykcja = cena wczorajsza
+
+metryki_var_A <- c(
+  MAE  = mean(abs(e_var)),
+  RMSE = sqrt(mean(e_var^2)),
+  MAPE = mean(abs(e_var / cena_real)) * 100
+)
+
+metryki_naiwny_val <- c(
+  MAE  = mean(abs(e_naiwny)),
+  RMSE = sqrt(mean(e_naiwny^2)),
+  MAPE = mean(abs(e_naiwny / cena_real)) * 100
+)
+
+cat("\nMetryki VAR(A) na zbiorze walidacyjnym (zł):\n")
+print(metryki_var_A)
+cat("\nMetryki modelu naiwnego na zbiorze walidacyjnym (zł):\n")
+print(metryki_naiwny_val)
+```
+
+==============================================================================
+ ### Wykres — w cenach (zł)  ---  ZASTĄP CHUNK (oryg. ~665-724)
+==============================================================================
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'VAR(A) - predykcja vs rzeczywistość (zbiór walidacyjny)' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "Wykres predykcji VAR(A)"
+# Autor: Maciej Kuchcik
+
+if (FORMAT == "html") {
+  df_val <- data.frame(
+    x           = as.numeric(as.POSIXct(daty_val)) * 1000,
+    rzeczywiste = cena_real,
+    prognoza    = cena_pred_var,
+    blad        = e_var
+  )
+
+  highchart() |>
+    hc_title(text = "VAR(A) — predykcja vs rzeczywistość (zbiór walidacyjny)") |>
+    hc_xAxis(type = "datetime") |>
+    hc_yAxis_multiples(
+      list(title = list(text = "Cena zamknięcia (zł)"), opposite = FALSE),
+      list(title = list(text = "Błąd (zł)"), opposite = TRUE, gridLineWidth = 0)
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_val$x, y = df_val$rzeczywiste)),
+      type = "line", name = "Rzeczywista", color = "#2196F3", yAxis = 0
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_val$x, y = df_val$prognoza)),
+      type = "line", name = "Prognoza VAR(A)", color = "#FF9800",
+      dashStyle = "ShortDash", yAxis = 0
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_val$x, y = df_val$blad)),
+      type = "line", name = "Błąd", color = "rgba(229,57,53,0.5)", yAxis = 1
+    ) |>
+    hc_tooltip(valueDecimals = 2, valueSuffix = " zł", shared = TRUE) |>
+    hc_legend(enabled = TRUE) |>
+    hc_rangeSelector(enabled = TRUE) |>
+    hc_scrollbar(enabled = TRUE)
+
+} else {
+  par(bg = "white", col.axis = "black", col.lab = "black",
+      col.main = "black", fg = "black")
+
+  plot(daty_val, cena_real,
+       type = "l", col = "royalblue", lwd = 1.5,
+       xlab = "Data", ylab = "Cena zamknięcia (zł)",
+       main = "VAR(A) — predykcja vs rzeczywistość")
+  lines(daty_val, cena_pred_var, col = "tomato", lwd = 1.5, lty = 2)
+  grid(col = "#cccccc")
+
+  par(new = TRUE)
+  plot(daty_val, e_var, type = "l",
+       col = adjustcolor("red3", alpha.f = 0.4), lwd = 1,
+       axes = FALSE, xlab = "", ylab = "")
+  axis(4, col = "red3", col.axis = "red3")
+  mtext("Błąd (zł)", side = 4, line = 3, col = "red3")
+
+  legend("topleft",
+         legend = c("Rzeczywista", "Prognoza VAR(A)", "Błąd"),
+         col    = c("royalblue", "tomato", "red3"),
+         lty    = c(1, 2, 1), lwd = 2, bty = "n")
+}
+```
+
+==============================================================================
+ SZKIC VAR(B) — makro dołożone do danych giełdowych (do uzupełnienia)
+==============================================================================
+- VAR(B) = zmienne z VAR(A) + makro zróżnicowane do stacjonarności:
+    pkb_d      = diff(log(all_data$PKB))
+    bezrob_d   = diff(all_data$Bezrobocie)
+    inflacja_d = diff(all_data$Inflacja)
+- Tę samą pętlę rekursywną i tę samą rekonstrukcję ceny (exp) można wykorzystać
+  ponownie — wystarczy zmienić zbiór wejściowy (dane_var_B) i ewentualnie p_opt.
+- UWAGA: makro przez na.locf jest dzienne tylko pozornie (diff = 0 przez większość
+  dni). Jeśli VAR(B) nie poprawi metryk względem VAR(A), to oczekiwany efekt
+  problemu mieszania częstotliwości — warto to opisać we Wnioskach.
+==============================================================================
