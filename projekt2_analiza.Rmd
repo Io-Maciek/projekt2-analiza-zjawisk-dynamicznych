@@ -367,39 +367,35 @@ class(all_data)
 head(all_data)
 ```
 
-## Podział danych na zbiory treningowe, walidacyjne i testowe
+## Podział danych na zbiór treningowy i testowy
 
-Dane zostają podzielone chronologicznie na trzy rozłączne zbiory:
+W analizie szeregów czasowych (VAR, ARIMA) standardem jest podział na próbę **wewnątrzpróbkową** (*in-sample*, treningową) oraz **pozapróbkową** (*out-of-sample*, testową). Trójpodział z osobnym zbiorem walidacyjnym ma sens głównie tam, gdzie stroi się hiperparametry — tutaj rząd modeli (p dla VAR, rzędy dla ARIMA) dobierany jest automatycznie kryterium informacyjnym na zbiorze treningowym, więc osobna walidacja nie jest potrzebna. Wszystkie modele porównujemy uczciwie na tym samym zbiorze testowym.
 
-- **Treningowy (70%)** - estymacja modeli,
-- **Walidacyjny (20%)** - strojenie i porównanie modeli,
-- **Testowy (10%)** - ostateczna ocena jakości predykcji.
+Dane dzielimy chronologicznie w proporcji **80/20** (typowy domyślny podział dla prognozowania szeregów czasowych):
+
+- **Treningowy (80%)** - estymacja modeli (*in-sample*),
+- **Testowy (20%)** - ocena jakości predykcji pozapróbkowej (*out-of-sample*).
 
 ```{r}
-#| code-summary: "Podział danych na 70-20-10%"
+#| code-summary: "Podział danych na 80-20%"
 # Autor: Maciej Kuchcik
-# TODO - podzial na 3 zbiory jest wgl niepotrzebny
+
 n <- nrow(all_data)
 
-n_train <- floor(0.70 * n)
-n_val   <- floor(0.20 * n)
-n_test  <- n - n_train - n_val
+n_train <- floor(0.80 * n)
+n_test  <- n - n_train
 
 all_data_train <- all_data[1:n_train, ]
-all_data_val   <- all_data[(n_train + 1):(n_train + n_val), ]
-all_data_test  <- all_data[(n_train + n_val + 1):n, ]
+all_data_test  <- all_data[(n_train + 1):n, ]
 
 cat(sprintf(
   "Liczba obserwacji: %d
-    Treningowy  (70%%): %d  (%s - %s)
-    Walidacyjny (20%%): %d  (%s - %s)
-    Testowy     (10%%): %d  (%s - %s)\n",
+    Treningowy (80%%): %d  (%s - %s)
+    Testowy    (20%%): %d  (%s - %s)\n",
   n,
-  nrow(all_data_train), as.character(index(first(all_data_train))), 
+  nrow(all_data_train), as.character(index(first(all_data_train))),
     as.character(index(last(all_data_train))),
-  nrow(all_data_val),   as.character(index(first(all_data_val))),   
-    as.character(index(last(all_data_val))),
-  nrow(all_data_test),  as.character(index(first(all_data_test))),  
+  nrow(all_data_test),  as.character(index(first(all_data_test))),
     as.character(index(last(all_data_test)))
 ))
 ```
@@ -424,35 +420,18 @@ Jak opisano we [wstępie](#cel), model naiwny (czy też bazowy) będzie zakłada
 # Autor: Maciej Kuchcik
 
 pzu_train <- all_data_train$PZU.WA.Close
-pzu_val   <- all_data_val$PZU.WA.Close
 pzu_test  <- all_data_test$PZU.WA.Close
 
+# Predykcja naiwna: cena wczorajsza (lag o 1 dzień) na zbiorze testowym
+pzu_test_pred <- lag(all_data$PZU.WA.Close, k = 1)[(n_train + 1):n, ]
+pzu_test_real <- pzu_test
+e <- as.numeric(pzu_test_real) - as.numeric(pzu_test_pred)
 
-pzu_test_pred<-lag(all_data$PZU.WA.Close, k = 1)[(n_train + n_val + 1):n, ]
-pzu_test_real<-pzu_test
-e<-as.numeric(pzu_test_real) - as.numeric(pzu_test_pred)
 metryki_naiwny <- c(
-    MAE  = mean(abs(e)), 
-    RMSE = sqrt(mean(e^2)), 
+    MAE  = mean(abs(e)),
+    RMSE = sqrt(mean(e^2)),
     MAPE = mean(abs(e / as.numeric(pzu_test_real))) * 100
   )
-
-
-
-pzu_val_pred <- lag(all_data$PZU.WA.Close, k = 1)[(n_train + 1):(n_train + n_val), ]
-pzu_val_real <- pzu_val
-
-# Błąd na zbiorze walidacyjnym
-e_2 <- as.numeric(pzu_val_real) - as.numeric(pzu_val_pred)
-
-metryki_naiwny_2 <- c(
-    MAE  = mean(abs(e_2)), 
-    RMSE = sqrt(mean(e_2^2)), 
-    MAPE = mean(abs(e_2 / as.numeric(pzu_val_real))) * 100
-)
-metryki_naiwny_2
-
-
 
 if (FORMAT == "html") {
   # Wykres interaktywny HTML
@@ -468,10 +447,10 @@ if (FORMAT == "html") {
     hc_title(text = "Model naiwny - predykcja vs rzeczywistość (zbiór testowy)") |>
     hc_xAxis(type = "datetime") |>
     hc_yAxis_multiples(
-      list(title = list(text = "Cena zamknięcia (zł)"), opposite = FALSE, 
-           min = 37, max = 60, startOnTick = FALSE, endOnTick = FALSE),
-      list(title = list(text = "Błąd (zł)"), opposite = TRUE, gridLineWidth = 0, 
-           min = -10, max = 4, startOnTick = FALSE, endOnTick = FALSE)
+      list(title = list(text = "Cena zamknięcia (zł)"), opposite = FALSE,
+           startOnTick = FALSE, endOnTick = FALSE),
+      list(title = list(text = "Błąd (zł)"), opposite = TRUE, gridLineWidth = 0,
+           startOnTick = FALSE, endOnTick = FALSE)
     ) |>
     
     hc_add_series(
@@ -543,15 +522,15 @@ metryki_naiwny
 ```
 
 
-**Metryki:**
+**Metryki** (zbiór testowy, ok. 3 lata: 2022-03 – 2025-03):
 
- - MAE = 0.59 zł - średnio model myli się o 60 groszy,
- - RMSE = 0.85 zł - większy od MAE, zdarzają się pojedyncze dni z większymi skokami (RMSE karze mocniej za duże błędy),
- - MAPE = 1.25% - procentowo błąd jest bardzo mały. Przy cenie akcji z zakresu 40–60 zł pomyłka o 1.25% to właśnie około 60 groszy.
- 
+ - MAE = 0.52 zł - średnio model myli się o ok. 52 grosze,
+ - RMSE = 0.74 zł - większy od MAE, zdarzają się pojedyncze dni z większymi skokami (RMSE karze mocniej za duże błędy),
+ - MAPE = 1.31% - procentowo błąd jest bardzo mały. Przy cenie akcji z zakresu ok. 23–59 zł pomyłka o 1.31% to właśnie około pół złotego.
+
 **Wykres:**
 
-Linia błędu oscyluje blisko zera przez większość okresu, co potwierdza, że ceny PZU zmieniają się powoli i model naiwny dobrze to wykorzystuje. Widoczny jest jeden wyraźny skok błędu 17 września 2024 (ok. -10 zł). Okazuje się, że to był [dzień wypłat dywidend](https://strefainwestorow.pl/notowania/spolki/PLPZU0000011/dywidendy) dla tej spółki, czego model nie mógł przewidzieć.
+Linia błędu oscyluje blisko zera przez większość okresu, co potwierdza, że ceny PZU zmieniają się powoli i model naiwny dobrze to wykorzystuje. Widoczne są pojedyncze wyraźne skoki błędu — największy 16 września 2024 (ok. -7.5 zł), kolejny 6 września 2023 (ok. -3.2 zł). Okazuje się, że to były [dni wypłat dywidend](https://strefainwestorow.pl/notowania/spolki/PLPZU0000011/dywidendy) dla tej spółki, czego model nie mógł przewidzieć.
 
 ## Model ARIMA
 
@@ -589,166 +568,12 @@ sprawdz_wszystkie(all_data_train)
 
 ### Tworzenie modelu
 
-```{r}
-var_A  <- na.omit(merge(
-  zamkniecia    = diff(log(all_data_train$PZU.WA.Close)),
-  #volume   = all_data_train$PZU.WA.Volume,
-  pkb      = all_data_train$PKB,
-  bezrob   = diff(all_data_train$Bezrobocie),
-  inflacja = diff(all_data_train$Inflacja)
-))
+Do modelu VAR(A) trafiają wyłącznie dane giełdowe (kilka wymiarów, jedna częstotliwość). Ceny są niestacjonarne, więc każdą serię sprowadzamy do logarytmicznych stóp zwrotu (`diff(log(...))`). Transformacje liczymy na pełnym szeregu, a dopiero potem dzielimy na trening/test — dzięki temu nie gubimy zwrotu na granicy podziału.
 
-var_A_val <- na.omit(merge(
-  zamkniecia = diff(log(all_data_val$PZU.WA.Close)),
-  pkb        = all_data_val$PKB,
-  bezrob     = diff(all_data_val$Bezrobocie),
-  inflacja   = diff(all_data_val$Inflacja)
-))
-
-
-all(sprawdz_wszystkie(var_A) == 1)
-```
-
-### Predykcja
-
-```{r}
-var_select <- VARselect(var_A, lag.max = 10, type = "const")
-p_opt <- var_select$selection["AIC(n)"]
-cat("Optymalny rząd VAR (AIC):", p_opt, "\n")
-```
-
-```{r}
-model_var_A <- VAR(var_A, p = p_opt, type = "const")
-summary(model_var_A)
-```
-
-```{r}
-n_val     <- nrow(var_A_val)
-prognozy  <- numeric(n_val)
-```
-
-
-```{r}
-# Zwiększ liczbę historii startowej, jeśli p_opt jest duże
-historia_n <- p_opt + 5  # Zapewnij sobie mały zapas obserwacji
-historia <- tail(as.data.frame(var_A), historia_n)
-
-for (i in seq_len(n_val)) {
-  # Budowanie okna
-  dodatkowe_dane <- if(i > 1) as.data.frame(var_A_val)[seq_len(i - 1), , drop = FALSE] else NULL
-  okno <- rbind(historia, dodatkowe_dane)
-  
-  # Sprawdzenie czy mamy wystarczająco dużo danych
-  if (nrow(okno) > (p_opt + 1)) {
-    model_tmp <- VAR(okno, p = p_opt, type = "const")
-    pred      <- predict(model_tmp, n.ahead = 1)
-    prognozy[i] <- pred$fcst$PZU.WA.Close[1, "fcst"]
-  } else {
-    # Dla pierwszych kroków, gdzie danych jest za mało, 
-    # możesz przyjąć prognozę naiwną lub NA
-    prognozy[i] <- NA 
-  }
-}
-```
-
-```{r}
-rzeczywiste <- as.numeric(var_A_val$zamkniecia)
-e           <- rzeczywiste - prognozy
-
-metryki_var_A <- c(
-  MAE  = mean(abs(e)),
-  RMSE = sqrt(mean(e^2)),
-  MAPE = mean(abs(e / rzeczywiste)) * 100
-)
-cat("\nMetryki VAR(A) na zbiorze walidacyjnym:\n")
-print(metryki_var_A)
-
-```
-
-
-
-```{r}
-metryki_naiwny_val <- c(
-  MAE  = mean(abs(diff(as.numeric(all_data_val$PZU.WA.Close)))),
-  RMSE = sqrt(mean(diff(as.numeric(all_data_val$PZU.WA.Close))^2)),
-  MAPE = mean(abs(diff(as.numeric(all_data_val$PZU.WA.Close)) / 
-                    as.numeric(all_data_val$PZU.WA.Close[-1]))) * 100
-)
-cat("\nMetryki modelu naiwnego na zbiorze walidacyjnym:\n")
-print(metryki_naiwny_val)
-
-```
-
-```{r}
-daty_val <- index(var_A_val)
-
-if (FORMAT == "html") {
-  df_val <- data.frame(
-    x           = as.numeric(as.POSIXct(daty_val)) * 1000,
-    rzeczywiste = rzeczywiste,
-    prognoza    = prognozy,
-    blad        = e
-  )
-  
-  highchart() |>
-    hc_title(text = "VAR(A) — predykcja vs rzeczywistość (zbiór walidacyjny)") |>
-    hc_xAxis(type = "datetime") |>
-    hc_yAxis_multiples(
-      list(title = list(text = "Dzienna stopa zwrotu"), opposite = FALSE),
-      list(title = list(text = "Błąd"), opposite = TRUE, gridLineWidth = 0)
-    ) |>
-    hc_add_series(
-      data = list_parse2(data.frame(x = df_val$x, y = df_val$rzeczywiste)),
-      type = "line", name = "Rzeczywista", color = "#2196F3", yAxis = 0
-    ) |>
-    hc_add_series(
-      data = list_parse2(data.frame(x = df_val$x, y = df_val$prognoza)),
-      type = "line", name = "Prognoza VAR(A)", color = "#FF9800",
-      dashStyle = "ShortDash", yAxis = 0
-    ) |>
-    hc_add_series(
-      data = list_parse2(data.frame(x = df_val$x, y = df_val$blad)),
-      type = "line", name = "Błąd", color = "rgba(229,57,53,0.5)", yAxis = 1
-    ) |>
-    hc_tooltip(valueDecimals = 4, shared = TRUE) |>
-    hc_legend(enabled = TRUE) |>
-    hc_rangeSelector(enabled = TRUE) |>
-    hc_scrollbar(enabled = TRUE)
-  
-} else {
-  par(bg = "white", col.axis = "black", col.lab = "black",
-      col.main = "black", fg = "black")
-  
-  plot(daty_val, rzeczywiste,
-       type = "l", col = "royalblue", lwd = 1.5,
-       xlab = "Data", ylab = "Dzienna stopa zwrotu",
-       main = "VAR(A) — predykcja vs rzeczywistość")
-  lines(daty_val, prognozy, col = "tomato", lwd = 1.5, lty = 2)
-  grid(col = "#cccccc")
-  
-  par(new = TRUE)
-  plot(daty_val, e, type = "l",
-       col = adjustcolor("red3", alpha.f = 0.4), lwd = 1,
-       axes = FALSE, xlab = "", ylab = "")
-  axis(4, col = "red3", col.axis = "red3")
-  mtext("Błąd", side = 4, line = 3, col = "red3")
-  
-  legend("topleft",
-         legend = c("Rzeczywista", "Prognoza VAR(A)", "Błąd"),
-         col    = c("royalblue", "tomato", "red3"),
-         lty    = c(1, 2, 1), lwd = 2, bty = "n")
-}
-```
-
-
-## proba 2
 ```{r}
 #| code-summary: "Budowa zmiennych stacjonarnych dla VAR(A)"
 # Autor: Maciej Kuchcik
 
-# Transformacje liczymy na PEŁNYM szeregu (to tylko transformacja punktowa,
-# bez przecieku informacji), a dopiero potem dzielimy na train/val.
-# Dzięki temu nie gubimy zwrotu na granicy train/val.
 ret_close <- diff(log(all_data$PZU.WA.Close))
 ret_high  <- diff(log(all_data$PZU.WA.High))
 ret_low   <- diff(log(all_data$PZU.WA.Low))
@@ -760,16 +585,17 @@ dane_var <- merge(
   najnizsze  = ret_low,
   wolumen    = ret_vol
 )
+# UWAGA: merge.xts zachowuje oryginalne nazwy kolumn (PZU.WA.Close...),
+# dlatego wymuszamy własne nazwy - inaczej pred$fcst$zamkniecia byłoby puste.
+colnames(dane_var) <- c("zamkniecia", "najwyzsze", "najnizsze", "wolumen")
+
 # usuwamy NA z różnicowania oraz ewentualne wartości niefinitowe
 dane_var <- dane_var[apply(dane_var, 1, function(r) all(is.finite(r))), ]
 
-# Podział wg tych samych granic dat co podział 70/20/10
+# Podział wg tej samej granicy daty co podział 80/20
 koniec_train <- end(all_data_train)
-koniec_val   <- end(all_data_val)
-
-var_A     <- dane_var[index(dane_var) <= koniec_train]
-var_A_val <- dane_var[index(dane_var) >  koniec_train &
-                      index(dane_var) <= koniec_val]
+var_A      <- dane_var[index(dane_var) <= koniec_train]
+var_A_test <- dane_var[index(dane_var) >  koniec_train]
 
 # Wszystkie zmienne VAR(A) powinny być stacjonarne (zwroty/różnice logarytmów)
 stacjonarnosc_var_A <- sprawdz_wszystkie(var_A)
@@ -779,6 +605,9 @@ if (!all(stacjonarnosc_var_A == 1)) {
 all(stacjonarnosc_var_A == 1)
 ```
 
+### Predykcja
+
+Rząd opóźnień $p$ dobieramy kryterium AIC. Model VAR(p) automatycznie regresuje każdą zmienną na $p$ opóźnieniach wszystkich zmiennych (w tym własnych stóp zwrotu), więc opóźnienia cen są już wbudowane w model.
 
 ```{r}
 #| code-summary: "Dobór optymalnego rzędu VAR"
@@ -793,37 +622,43 @@ model_var_A <- VAR(var_A, p = p_opt, type = "const")
 summary(model_var_A)
 ```
 
+Prognozę pozapróbkową budujemy rekursywnie (*one-step-ahead*): model estymujemy na zbiorze treningowym i krok po kroku dokładamy kolejne zrealizowane obserwacje testowe, za każdym razem prognozując jeden dzień naprzód (okno rozszerzane). Pętla wymaga reestymacji VAR-a w każdym kroku (kilkadziesiąt sekund), dlatego chunk jest cache'owany (`cache: true`) — przelicza się ponownie tylko po zmianie kodu lub danych.
+
 ```{r}
-n_val_var <- nrow(var_A_val)   # NIE nadpisujemy globalnego n_val
-prognozy  <- numeric(n_val_var)
+#| code-summary: "Inicjalizacja"
+n_test_var <- nrow(var_A_test)
+prognozy   <- numeric(n_test_var)
 ```
 
 ```{r}
-#| code-summary: "Rekursywna prognoza VAR(A) na zbiorze walidacyjnym"
+#| code-summary: "Rekursywna prognoza VAR(A) na zbiorze testowym"
+#| cache: true
 # Startujemy z PEŁNEGO treningu i rozszerzamy okno o kolejne zrealizowane
-# obserwacje walidacyjne (expanding window, recursive one-step-ahead).
+# obserwacje testowe (expanding window, recursive one-step-ahead).
 historia <- as.data.frame(var_A)
 
-for (i in seq_len(n_val_var)) {
+for (i in seq_len(n_test_var)) {
   dodatkowe_dane <- if (i > 1) {
-    as.data.frame(var_A_val)[seq_len(i - 1), , drop = FALSE]
+    as.data.frame(var_A_test)[seq_len(i - 1), , drop = FALSE]
   } else NULL
 
   okno <- rbind(historia, dodatkowe_dane)
 
   model_tmp   <- VAR(okno, p = p_opt, type = "const")
   pred        <- predict(model_tmp, n.ahead = 1)
-  prognozy[i] <- pred$fcst$PZU.WA.Close[1, "fcst"]   # POPRAWIONA nazwa kolumny
+  prognozy[i] <- pred$fcst$zamkniecia[1, "fcst"]
 }
 ```
 
+Model prognozuje log-stopę zwrotu, którą odtwarzamy do poziomu ceny: $\hat{c}_t = c_{t-1}\cdot e^{\hat{r}_t}$. Dzięki temu metryki są w złotówkach i wprost porównywalne z modelem naiwnym, liczone na dokładnie tych samych datach.
+
 ```{r}
 #| code-summary: "Metryki VAR(A) i naiwnego w zł (porównywalne)"
-daty_val  <- index(var_A_val)
+daty_test <- index(var_A_test)
 
 # Cena rzeczywista w dniu t oraz cena z dnia poprzedniego (t-1)
-cena_real <- as.numeric(all_data$PZU.WA.Close[daty_val])
-cena_prev <- as.numeric(lag(all_data$PZU.WA.Close, k = 1)[daty_val])
+cena_real <- as.numeric(all_data$PZU.WA.Close[daty_test])
+cena_prev <- as.numeric(lag(all_data$PZU.WA.Close, k = 1)[daty_test])
 
 # Prognoza ceny: wczorajsza cena * exp(prognozowany log-zwrot)
 cena_pred_var <- cena_prev * exp(prognozy)
@@ -838,50 +673,50 @@ metryki_var_A <- c(
   MAPE = mean(abs(e_var / cena_real)) * 100
 )
 
-metryki_naiwny_val <- c(
+metryki_naiwny_test <- c(
   MAE  = mean(abs(e_naiwny)),
   RMSE = sqrt(mean(e_naiwny^2)),
   MAPE = mean(abs(e_naiwny / cena_real)) * 100
 )
 
-cat("\nMetryki VAR(A) na zbiorze walidacyjnym (zł):\n")
+cat("\nMetryki VAR(A) na zbiorze testowym (zł):\n")
 print(metryki_var_A)
-cat("\nMetryki modelu naiwnego na zbiorze walidacyjnym (zł):\n")
-print(metryki_naiwny_val)
+cat("\nMetryki modelu naiwnego na zbiorze testowym (zł):\n")
+print(metryki_naiwny_test)
 ```
 
 ```{r}
-#| fig-cap: !expr "if (knitr::is_latex_output()) 'VAR(A) - predykcja vs rzeczywistość (zbiór walidacyjny)' else NULL"
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'VAR(A) - predykcja vs rzeczywistość (zbiór testowy)' else NULL"
 #| renderings: [light, dark]
 #| code-summary: "Wykres predykcji VAR(A)"
 # Autor: Maciej Kuchcik
 
 if (FORMAT == "html") {
-  df_val <- data.frame(
-    x           = as.numeric(as.POSIXct(daty_val)) * 1000,
+  df_test <- data.frame(
+    x           = as.numeric(as.POSIXct(daty_test)) * 1000,
     rzeczywiste = cena_real,
     prognoza    = cena_pred_var,
     blad        = e_var
   )
 
   highchart() |>
-    hc_title(text = "VAR(A) — predykcja vs rzeczywistość (zbiór walidacyjny)") |>
+    hc_title(text = "VAR(A) — predykcja vs rzeczywistość (zbiór testowy)") |>
     hc_xAxis(type = "datetime") |>
     hc_yAxis_multiples(
       list(title = list(text = "Cena zamknięcia (zł)"), opposite = FALSE),
       list(title = list(text = "Błąd (zł)"), opposite = TRUE, gridLineWidth = 0)
     ) |>
     hc_add_series(
-      data = list_parse2(data.frame(x = df_val$x, y = df_val$rzeczywiste)),
+      data = list_parse2(data.frame(x = df_test$x, y = df_test$rzeczywiste)),
       type = "line", name = "Rzeczywista", color = "#2196F3", yAxis = 0
     ) |>
     hc_add_series(
-      data = list_parse2(data.frame(x = df_val$x, y = df_val$prognoza)),
+      data = list_parse2(data.frame(x = df_test$x, y = df_test$prognoza)),
       type = "line", name = "Prognoza VAR(A)", color = "#FF9800",
       dashStyle = "ShortDash", yAxis = 0
     ) |>
     hc_add_series(
-      data = list_parse2(data.frame(x = df_val$x, y = df_val$blad)),
+      data = list_parse2(data.frame(x = df_test$x, y = df_test$blad)),
       type = "line", name = "Błąd", color = "rgba(229,57,53,0.5)", yAxis = 1
     ) |>
     hc_tooltip(valueDecimals = 2, valueSuffix = " zł", shared = TRUE) |>
@@ -893,15 +728,15 @@ if (FORMAT == "html") {
   par(bg = "white", col.axis = "black", col.lab = "black",
       col.main = "black", fg = "black")
 
-  plot(daty_val, cena_real,
+  plot(daty_test, cena_real,
        type = "l", col = "royalblue", lwd = 1.5,
        xlab = "Data", ylab = "Cena zamknięcia (zł)",
        main = "VAR(A) — predykcja vs rzeczywistość")
-  lines(daty_val, cena_pred_var, col = "tomato", lwd = 1.5, lty = 2)
+  lines(daty_test, cena_pred_var, col = "tomato", lwd = 1.5, lty = 2)
   grid(col = "#cccccc")
 
   par(new = TRUE)
-  plot(daty_val, e_var, type = "l",
+  plot(daty_test, e_var, type = "l",
        col = adjustcolor("red3", alpha.f = 0.4), lwd = 1,
        axes = FALSE, xlab = "", ylab = "")
   axis(4, col = "red3", col.axis = "red3")
@@ -913,6 +748,8 @@ if (FORMAT == "html") {
          lty    = c(1, 2, 1), lwd = 2, bty = "n")
 }
 ```
+
+**Wynik:** VAR(A) na samych danych giełdowych praktycznie nie różni się od modelu naiwnego (MAE ≈ 0.52 zł, RMSE ≈ 0.74 zł, MAPE ≈ 1.31% — niemal identycznie). Dzienne stopy zwrotu PZU są w praktyce nieprzewidywalne na podstawie własnej historii oraz cen max/min i wolumenu — prognozowany zwrot oscyluje wokół zera, więc predykcja ceny sprowadza się do „ceny wczorajszej". Jest to spójne ze słabą formą hipotezy rynku efektywnego. Sprawdzenie, czy dane makroekonomiczne wniosą cokolwiek więcej, jest celem modelu VAR(B).
 
 ## Model VAR (B)
 
