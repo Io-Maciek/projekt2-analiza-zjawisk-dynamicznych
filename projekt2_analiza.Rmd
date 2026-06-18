@@ -10,7 +10,7 @@ author:
 title-block-banner: true
 format:
   html:
-    output-file: "wybor_tematu.html"
+    output-file: "Raport_Predycka_cen_akcji_spolki_PZU.html"
     code-fold: true
     other-links: false
     code-block-bg: true
@@ -510,8 +510,9 @@ Ta częśc projektu zostanie pośwęcona ostatecznej predykcji dziennych cen zam
 
 1.  **Model naiwny/bazowy:** $\text{predykcja} = \text{wartość wczorajsza}$. Wykorzystane zostaną tylko dane z cen zamknięcia (jeden wymiar, jedna częstotliwość).
 2.  **Model ARIMA:** wykorzystana zostanie *autoarima* na cenach zamknięcia (jeden wymiar, jedna częstotliwość).
-3.  **Model VAR A:** użyje funkcji *VAR* oraz pełnych danych giełdowych z cenami zamknięcia, wolumenem, cenami minimalnymi i maksymalnymi (kilka wymiarów, jedna częstotliwość).
-4.  **Model VAR B:** do danych z **VAR A** dołożone zostaną dane makroekonomiczne (kilka wymiarów, jedna częstotliwość).
+3.  **Model ARIMAX:** rozszerza ARIMA o zmiany PKB, inflacji i stopy bezroboci
+4.  **Model VAR A:** użyje funkcji *VAR* oraz pełnych danych giełdowych z cenami zamknięcia, wolumenem, cenami minimalnymi i maksymalnymi (kilka wymiarów, jedna częstotliwość).
+5.  **Model VAR B:** do danych z **VAR A** dołożone zostaną dane makroekonomiczne (kilka wymiarów, jedna częstotliwość).
 
 ## Model naiwny
 
@@ -552,8 +553,599 @@ metryki_naiwny
 
 Linia błędu oscyluje blisko zera przez większość okresu, co potwierdza, że ceny PZU zmieniają się powoli i model naiwny dobrze to wykorzystuje. Widoczne są pojedyncze wyraźne skoki błędu, a największy z 16 września 2024 (ok. -7.5 zł), kolejny 6 września 2023 (ok. -3.2 zł). Okazuje się, że to były [dni wypłat dywidend](https://strefainwestorow.pl/notowania/spolki/PLPZU0000011/dywidendy) dla tej spółki, czego model nie mógł przewidzieć.
 
-## Model ARIMA
-TODO
+## Model ARIMA i ARIMAX
+
+W tej części porównane zostaną dwa modele szeregu czasowego:
+
+1. **ARIMA** – wykorzystujący wyłącznie wcześniejsze zmiany ceny
+   zamknięcia PZU,
+2. **ARIMAX** – rozszerzający ARIMA o zmiany PKB, inflacji i stopy
+   bezrobocia
+   
+  W obu modelach prognozowana jest logarytmiczna stopa zwrotu ceny zamknięcia.Zastosowanie stóp zwrotu zamiast surowych cen pozwala otrzymać stacjonarny szereg
+
+
+```{r}
+#| code-summary: "Przygotowanie danych dla ARIMA i ARIMAX"
+# Autor: Andrzej Szuwald
+
+# Logarytmiczna stopa zwrotu ceny zamknięcia PZU
+zwrot_pzu <- diff(log(all_data$PZU.WA.Close))
+
+# Zmiany wskaźników makroekonomicznych
+# lag(..., k = 1) oznacza, że wykorzystujemy wartość z poprzedniego okresu sprawozdawczego. Ogranicza to ryzyko wykorzystania informacji,która nie była jeszcze znana w momencie prognozy.
+
+pkb_zmiana_arimax <- lag(diff(log(pkb_final)), k = 1)
+inflacja_zmiana_arimax <- lag(diff(inflacja_final), k = 1)
+bezrobocie_zmiana_arimax <- lag(diff(bezrobocie_final), k = 1)
+
+# Przypisanie ostatniej dostępnej wartości makro do kolejnych dni giełdowych
+daty_gieldowe <- index(pzu_final)
+
+pkb_arimax <- synchronizuj_z_gielda(
+  pkb_zmiana_arimax,
+  daty_gieldowe
+)
+
+inflacja_arimax <- synchronizuj_z_gielda(
+  inflacja_zmiana_arimax,
+  daty_gieldowe
+)
+
+bezrobocie_arimax <- synchronizuj_z_gielda(
+  bezrobocie_zmiana_arimax,
+  daty_gieldowe
+)
+
+# Jeden wspólny zbiór dla obu modeli, by mogły zostać ocenione na tych samych dniach
+dane_arima_arimax <- merge(
+  zwrot = zwrot_pzu,
+  pkb = pkb_arimax,
+  inflacja = inflacja_arimax,
+  bezrobocie = bezrobocie_arimax
+)
+
+colnames(dane_arima_arimax) <- c(
+  "zwrot",
+  "pkb",
+  "inflacja",
+  "bezrobocie"
+)
+
+dane_arima_arimax <- dane_arima_arimax[
+  apply(
+    dane_arima_arimax,
+    1,
+    function(wiersz) all(is.finite(wiersz))
+  ),
+]
+
+# Podział według tej samej daty granicznej używanej przez pozostałe modele
+koniec_train_arima <- end(all_data_train)
+
+dane_arima_train <- dane_arima_arimax[
+  index(dane_arima_arimax) <= koniec_train_arima
+]
+
+dane_arima_test <- dane_arima_arimax[
+  index(dane_arima_arimax) > koniec_train_arima
+]
+
+cat(
+  "Trening:",
+  nrow(dane_arima_train),
+  "obserwacji\n"
+)
+
+cat(
+  "Test:",
+  nrow(dane_arima_test),
+  "obserwacji\n"
+)
+```
+### Standaryzacja zmiennych makroekonomicznych
+Przeprowadzamy standaryzacje z uwagi na to, że nasze dane mają różne jednostki i skale
+
+```{r}
+#| code-summary: "Standaryzacja zmiennych dla ARIMAX"
+# Autor: Andrzej Szuwald
+
+y_train_arima <- as.numeric(dane_arima_train$zwrot)
+y_test_arima <- as.numeric(dane_arima_test$zwrot)
+
+xreg_train_raw_arimax <- as.matrix(
+  dane_arima_train[, c("pkb", "inflacja", "bezrobocie")]
+)
+
+xreg_test_raw_arimax <- as.matrix(
+  dane_arima_test[, c("pkb", "inflacja", "bezrobocie")]
+)
+
+# Parametry standaryzacji są wyznaczane wyłącznie na treningu.
+xreg_srednia_arimax <- colMeans(xreg_train_raw_arimax)
+xreg_odchylenie_arimax <- apply(xreg_train_raw_arimax, 2, sd)
+
+# Zabezpieczenie przed dzieleniem przez zero.
+xreg_odchylenie_arimax[
+  !is.finite(xreg_odchylenie_arimax) |
+    xreg_odchylenie_arimax == 0
+] <- 1
+
+xreg_train_arimax <- sweep(
+  xreg_train_raw_arimax,
+  2,
+  xreg_srednia_arimax,
+  FUN = "-"
+)
+
+xreg_train_arimax <- sweep(
+  xreg_train_arimax,
+  2,
+  xreg_odchylenie_arimax,
+  FUN = "/"
+)
+
+xreg_test_arimax <- sweep(
+  xreg_test_raw_arimax,
+  2,
+  xreg_srednia_arimax,
+  FUN = "-"
+)
+
+xreg_test_arimax <- sweep(
+  xreg_test_arimax,
+  2,
+  xreg_odchylenie_arimax,
+  FUN = "/"
+)
+
+colnames(xreg_train_arimax) <- c(
+  "pkb",
+  "inflacja",
+  "bezrobocie"
+)
+
+colnames(xreg_test_arimax) <- colnames(xreg_train_arimax)
+```
+### Test stacjonarności
+
+```{r}
+#| code-summary: "Test stacjonarności zwrotów PZU"
+# Autor: Andrzej Szuwald
+
+wynik_adf_arima <- suppressWarnings(
+  adf.test(y_train_arima)
+)
+
+print(wynik_adf_arima)
+
+if (wynik_adf_arima$p.value < 0.05) {
+  cat("Logarytmiczne stopy zwrotu PZU są stacjonarne.\n")
+} else {
+  cat("Brak podstaw do uznania stóp zwrotu za stacjonarne.\n")
+}
+```
+Wynik testu ADF pozwala odrzucić hipotezę o występowaniu pierwiastka
+jednostkowego, ponieważ wartość p-value jest mniejsza od 0,05. Logarytmiczne
+stopy zwrotu ceny zamknięcia PZU są zatem stacjonarne i nie wymagają
+dodatkowego różnicowania
+
+### Model ARIMA
+
+
+Ponieważ zmienna została już przekształcona do postaci stacjonarnej,
+ustalamy stopień różnicowania na `d = 0`. Funkcja `auto.arima()` wybiera
+wartości `p` i `q` na podstawie kryterium AICc
+
+
+```{r}
+#| code-summary: "Wybór modelu ARIMA"
+# Autor: Andrzej Szuwald
+
+model_arima <- auto.arima(
+  y_train_arima,
+  d = 0,
+  max.d = 0,
+  stationary = TRUE,
+  seasonal = FALSE,
+  ic = "aicc",
+  stepwise = FALSE,
+  approximation = FALSE,
+  allowmean = TRUE
+)
+
+cat("Wybrany model ARIMA:\n")
+print(model_arima)
+
+cat("\nRząd modelu ARIMA:\n")
+print(arimaorder(model_arima))
+
+summary(model_arima)
+```
+
+
+### Model ARIMAX
+
+ARIMAX rozszerza model ARIMA o zewnętrzne zmienne objaśniające:
+
+- zmianę PKB,
+- zmianę inflacji,
+- zmianę stopy bezrobocia.
+
+```{r}
+#| code-summary: "Wybór modelu ARIMAX"
+# Autor: Andrzej Szuwald
+
+model_arimax <- auto.arima(
+  y_train_arima,
+  xreg = xreg_train_arimax,
+  d = 0,
+  max.d = 0,
+  stationary = TRUE,
+  seasonal = FALSE,
+  ic = "aicc",
+  stepwise = FALSE,
+  approximation = FALSE,
+  allowmean = TRUE
+)
+
+cat("Wybrany model ARIMAX:\n")
+print(model_arimax)
+
+cat("\nRząd błędów modelu ARIMAX:\n")
+print(arimaorder(model_arimax))
+
+summary(model_arimax)
+```
+
+
+### Istotność współczynników ARIMAX
+
+```{r}
+#| code-summary: "Istotność współczynników ARIMAX"
+# Autor: Andrzej Szuwald
+
+wsp_arimax <- coef(model_arimax)
+se_arimax <- sqrt(diag(model_arimax$var.coef))
+z_arimax <- wsp_arimax / se_arimax
+p_arimax <- 2 * (1 - pnorm(abs(z_arimax)))
+
+tabela_wsp_arimax <- data.frame(
+  Zmienna = names(wsp_arimax),
+  Wspolczynnik = as.numeric(wsp_arimax),
+  Blad_standardowy = as.numeric(se_arimax),
+  Statystyka_z = as.numeric(z_arimax),
+  p_value = as.numeric(p_arimax),
+  Istotna_005 = ifelse(p_arimax < 0.05, "Tak", "Nie")
+)
+
+knitr::kable(
+  tabela_wsp_arimax,
+  digits = 6,
+  col.names = c(
+    "Zmienna",
+    "Współczynnik",
+    "Błąd standardowy",
+    "Statystyka z",
+    "p-value",
+    "Istotna przy 0,05"
+  ),
+  caption = "Ocena istotności współczynników ARIMAX"
+)
+```
+### Porównanie AICc modeli
+```{r}
+#| code-summary: "Porównanie kryteriów informacyjnych"
+# Autor: Andrzej Szuwald
+
+tabela_aicc <- data.frame(
+  Model = c("ARIMA", "ARIMAX"),
+  AIC = c(model_arima$aic, model_arimax$aic),
+  AICc = c(model_arima$aicc, model_arimax$aicc),
+  BIC = c(model_arima$bic, model_arimax$bic)
+)
+
+knitr::kable(
+  tabela_aicc,
+  digits = 2,
+  caption = "Kryteria informacyjne modeli ARIMA i ARIMAX"
+)
+```
+
+
+
+### Diagnostyka ARIMA i ARIMAX
+
+```{r}
+#| fig-cap: "Diagnostyka reszt modelu ARIMA"
+#| code-summary: "Diagnostyka modelu ARIMA"
+# Autor: Andrzej Szuwald
+cat("Model_ARIMA")
+checkresiduals(model_arima)
+cat("Model_ARIMAX")
+checkresiduals(model_arimax)
+```
+#### Interpretacja diagnostyki ARIMA i ARIMAX
+
+####ARIMA
+Test Ljunga-Boxa dał wartość $p=0{,}5832$. Jest ona większa od 0,05, dlatego
+nie ma podstaw do stwierdzenia istotnej autokorelacji reszt. Reszty mogą być
+traktowane jak biały szum. Model uwzględnił dostępną strukturę czasową,
+chociaż ostatecznie okazała się ona bardzo prosta
+####ARIMAX
+Test Ljunga-Boxa dał wartość $p=0{,}5373$. Również w tym przypadku wartość
+jest większa od 0,05, dlatego nie wykryto istotnej autokorelacji reszt.
+Po uwzględnieniu danych makroekonomicznych w błędach nie pozostał wyraźny
+wzorzec czasowy możliwy do wykorzystania przez składniki AR lub MA
+
+
+### Rekursywna prognoza jednodniowa
+
+by zachować zgodność z modelami VAR, wykonujemy prognozę jednodniową
+z rozszerzanym oknem. W każdym kroku modele wykorzystują wyłącznie
+obserwacje dostępne przed prognozowanym dniem
+
+
+```{r}
+#| code-summary: "Rekursywna prognoza ARIMA i ARIMAX"
+#| cache: true
+# Autor: Andrzej Szuwald
+
+# Rzędy wybranych modeli
+order_arima <- unname(
+  arimaorder(model_arima)[c("p", "d", "q")]
+)
+
+order_arimax <- unname(
+  arimaorder(model_arimax)[c("p", "d", "q")]
+)
+
+# Sprawdzenie, czy modele zawierają średnią
+arima_ma_srednia <- (
+  "intercept" %in% names(coef(model_arima))
+)
+
+arimax_ma_srednia <- (
+  "intercept" %in% names(coef(model_arimax))
+)
+
+n_test_modeli <- length(y_test_arima)
+
+prognozy_zwrot_arima <- numeric(n_test_modeli)
+prognozy_zwrot_arimax <- numeric(n_test_modeli)
+
+for (i in seq_len(n_test_modeli)) {
+
+  if (i == 1) {
+
+  historia_y <- y_train_arima
+  historia_x <- xreg_train_arimax
+
+  } else {
+
+    historia_y <- c(
+      y_train_arima,
+      y_test_arima[seq_len(i - 1)]
+    )
+
+    historia_x <- rbind(
+      xreg_train_arimax,
+      xreg_test_arimax[seq_len(i - 1), , drop = FALSE]
+    )
+  }
+
+  # ARIMA
+  model_tmp_arima <- Arima(
+    historia_y,
+    order = order_arima,
+    include.mean = arima_ma_srednia,
+    method = "ML"
+  )
+
+  pred_tmp_arima <- forecast(
+    model_tmp_arima,
+    h = 1
+  )
+
+  prognozy_zwrot_arima[i] <- as.numeric(
+    pred_tmp_arima$mean[1]
+  )
+
+  # ARIMAX
+  model_tmp_arimax <- Arima(
+    historia_y,
+    order = order_arimax,
+    xreg = historia_x,
+    include.mean = arimax_ma_srednia,
+    method = "ML"
+  )
+
+  xreg_nastepny <- matrix(
+    xreg_test_arimax[i, ],
+    nrow = 1
+  )
+
+  colnames(xreg_nastepny) <- colnames(xreg_train_arimax)
+
+  pred_tmp_arimax <- forecast(
+    model_tmp_arimax,
+    h = 1,
+    xreg = xreg_nastepny
+  )
+
+  prognozy_zwrot_arimax[i] <- as.numeric(
+    pred_tmp_arimax$mean[1]
+  )
+}
+```
+
+### Odtworzenie poziomu cen
+
+Modele ARIMA i ARIMAX prognozują logarytmiczne stopy zwrotu. Prognozowaną
+cenę otrzymujemy ze wzoru:
+
+$$
+\widehat{P_t} = P_{t-1}\exp(\widehat{r_t}),
+$$
+
+gdzie:
+
+- $P_{t-1}$ oznacza cenę z poprzedniego dnia,
+- $\widehat{r_t}$ oznacza prognozowaną logarytmiczną stopę zwrotu.
+
+```{r}
+#| code-summary: "Przeliczenie prognoz na ceny zamknięcia"
+# Autor: Andrzej Szuwald
+
+daty_test_arima <- index(dane_arima_test)
+
+cena_real_arima <- as.numeric(
+  all_data$PZU.WA.Close[daty_test_arima]
+)
+
+cena_poprzednia_arima <- as.numeric(
+  lag(all_data$PZU.WA.Close, k = 1)[daty_test_arima]
+)
+
+cena_pred_arima <- cena_poprzednia_arima *
+  exp(prognozy_zwrot_arima)
+
+cena_pred_arimax <- cena_poprzednia_arima *
+  exp(prognozy_zwrot_arimax)
+
+blad_arima <- cena_real_arima - cena_pred_arima
+blad_arimax <- cena_real_arima - cena_pred_arimax
+```
+
+### Metryki ARIMA i ARIMAX
+
+```{r}
+#| code-summary: "Metryki ARIMA i ARIMAX"
+# Autor: Andrzej Szuwald
+
+metryki_arima <- oblicz_metryki(
+  blad_arima,
+  cena_real_arima
+)
+
+metryki_arimax <- oblicz_metryki(
+  blad_arimax,
+  cena_real_arima
+)
+
+cat("Metryki ARIMA:\n")
+print(metryki_arima)
+
+cat("\nMetryki ARIMAX:\n")
+print(metryki_arimax)
+```
+#### Interpretacja metryk
+ARIMA uzyskała wyniki identyczne jak model naiwny, ponieważ wybrana postać
+ARIMA(0,0,0) prognozuje zerową stopę zwrotu
+
+Spadek RMSE jest mniejszy niż jedna dziesiąta grosza i nie ma praktycznego
+znaczenia. ARIMAX nie wykazał zatem wyraźnej przewagi prognostycznej nad
+ARIMA
+
+### Wykres ARIMA
+
+```{r}
+#| fig-cap: "ARIMA - prognoza ceny PZU na zbiorze testowym"
+#| renderings: [light, dark]
+#| code-summary: "Wykres prognozy ARIMA"
+# Autor: Andrzej Szuwald
+
+wykres_predykcji(
+  daty_test_arima,
+  cena_real_arima,
+  cena_pred_arima,
+  blad_arima,
+  "ARIMA - predykcja vs rzeczywistość",
+  "ARIMA"
+)
+```
+
+### Wykres ARIMAX
+
+```{r}
+#| fig-cap: "ARIMAX - prognoza ceny PZU na zbiorze testowym"
+#| renderings: [light, dark]
+#| code-summary: "Wykres prognozy ARIMAX"
+# Autor: Andrzej Szuwald
+
+wykres_predykcji(
+  daty_test_arima,
+  cena_real_arima,
+  cena_pred_arimax,
+  blad_arimax,
+  "ARIMAX - predykcja vs rzeczywistość",
+  "ARIMAX"
+)
+```
+
+#### Interpretacja wykresów ARIMA I ARIMAX
+Prognozy ARIMA i ARIMAX przebiegają bardzo podobnie i są zbliżone do
+prognozy naiwnej. Największe błędy występują w dniach gwałtownych zmian ceny,
+których nie można było przewidzieć na podstawie spokojnie zmieniających się
+danych makroekonomicznych. Wykresy potwierdzają niewielką różnicę widoczną
+w metrykach
+
+
+### Porównanie ARIMA i ARIMAX z naiwnym
+
+```{r}
+#| code-summary: "Tabela porównawcza ARIMA i ARIMAX"
+# Autor: Andrzej Szuwald
+
+tabela_naiwny_arima_arimax <- data.frame(
+  Model = c(
+    "Naiwny",
+    "ARIMA",
+    "ARIMAX"
+  ),
+  MAE = unname(c(
+    metryki_naiwny["MAE"],
+    metryki_arima["MAE"],
+    metryki_arimax["MAE"]
+  )),
+  RMSE = unname(c(
+    metryki_naiwny["RMSE"],
+    metryki_arima["RMSE"],
+    metryki_arimax["RMSE"]
+  )),
+  MAPE = unname(c(
+    metryki_naiwny["MAPE"],
+    metryki_arima["MAPE"],
+    metryki_arimax["MAPE"]
+  ))
+)
+
+knitr::kable(
+  tabela_naiwny_arima_arimax,
+  digits = 4,
+  col.names = c(
+    "Model",
+    "MAE (zł)",
+    "RMSE (zł)",
+    "MAPE (%)"
+  ),
+  caption = "Porównanie modelu naiwnego, ARIMA i ARIMAX"
+)
+```
+
+#### Wniosek z porównania ARIMA i ARIMAX
+Porównanie nie wykazało praktycznie istotnej przewagi ARIMAX nad ARIMA.
+Dodanie zmian PKB, inflacji i bezrobocia spowodowało minimalne obniżenie
+RMSE, ale jednocześnie nieznacznie zwiększyło MAE, natomiast MAPE pozostało
+bez zmian. Różnice są zbyt małe, aby uznać, że dane makroekonomiczne poprawiają
+jednodniową prognozę ceny zamknięcia PZU
+
+#### Wniosek z porównania ARIMA I ARIMAX Z Naiwnym
+Model ARIMA uzyskał praktycznie takie same wyniki co model naiwny, więc nie uzyskuje przewagi nad naiwnym. Wynika to z tego, że model prognozuje zerową stopę zwrotu, dlatego po odtworzeniu poziomu ceny jego prognoza jest spójna z poprzednią ceną zamknięcia
+
+Model ARIMAX nieznacznie różni się od naiwnego, jednak minimalnie. W przypadku różnic to są one poniżej grosza, więc można nawet uznawać go za równego pozostałym z uwagi na to, że różnice są minimalne, co też potwierdzą znikomy wpływ dodania PKB, inflacji i bezrobocia
+
+
 ## Model VAR A
 
 ### Testy stacjonarności
@@ -787,7 +1379,62 @@ wykres_predykcji(daty_test_B, cena_real_B, cena_pred_var_B, e_var_B,
 
 Powód jest spójny z wcześniejszą diagnozą: dane makro zmieniają się wolno (kwartalnie/miesięcznie) i po synchronizacji schodkowej są w obrębie okresu stałe, nie niosą więc informacji o *dziennych* ruchach kursu. Dołożenie trzech zmiennych i dodatkowych parametrów (przy $p=10$) lekko pogarsza wynik pozapróbkowy (delikatne przeuczenie). Wniosek: na częstotliwości dziennej makro nie pomaga przewidywać kursu PZU, różnice między modelami mieszczą się w granicach szumu, a najprostszy model naiwny pozostaje twardym benchmarkiem. Po informację makro o wyższej wartości predykcyjnej należałoby sięgnąć po model jawnie mieszanej częstotliwości (np. MIDAS) zamiast wtłaczać miesięczne/kwartalne dane do dziennego VAR-a.
 
+## Tabela z wynikami końcowymi
+```{r}
+tabela_wyniki_koncowe <- data.frame(
+  Model = c(
+    "Naiwny",
+    "ARIMA",
+    "ARIMAX",
+    "VAR A",
+    "VAR B"
+  ),
+  MAE = unname(c(
+    metryki_naiwny["MAE"],
+    metryki_arima["MAE"],
+    metryki_arimax["MAE"],
+    metryki_var_A["MAE"],
+    metryki_var_B["MAE"]
+  )),
+  RMSE = unname(c(
+    metryki_naiwny["RMSE"],
+    metryki_arima["RMSE"],
+    metryki_arimax["RMSE"],
+    metryki_var_A["RMSE"],
+    metryki_var_B["RMSE"]
+  )),
+  MAPE = unname(c(
+    metryki_naiwny["MAPE"],
+    metryki_arima["MAPE"],
+    metryki_arimax["MAPE"],
+    metryki_var_A["MAPE"],
+    metryki_var_B["MAPE"]
+  ))
+)
+
+knitr::kable(
+  tabela_wyniki_koncowe,
+  digits = 4,
+  col.names = c(
+    "Model",
+    "MAE (zł)",
+    "RMSE (zł)",
+    "MAPE (%)"
+  ),
+  caption = "Końcowe porównanie wszystkich modeli"
+)
+```
 # Wnioski i podsumowanie
+Celem projektu było sprawdzenie, czy dane giełdowe oraz informacje o PKB, inflacji i bezrobociu pomagają przewidywać dzienną cenę zamknięcia akcji PZU
+
+Model naiwny osiągnął MAE 0,5220 zł, RMSE 0,7396 zł i MAPE 1,31%. Model ARIMA uzyskał identyczne wyniki, ponieważ wybrano postać ARIMA(0,0,0), która w praktyce prognozuje cenę z poprzedniego dnia
+
+ARIMAX, uwzględniający dane makroekonomiczne, osiągnął minimalnie niższy RMSE, ale nieznacznie wyższy MAE. Różnice były bardzo małe, dlatego nie można uznać ARIMAX za wyraźnie lepszy. Spośród zmiennych makroekonomicznych tylko inflacja okazała się statystycznie istotna, ale nie przełożyło się to na zauważalną poprawę prognozy
+
+Podobne wyniki uzyskano dla modeli VAR. VAR A był zbliżony do modelu naiwnego, natomiast VAR B po dodaniu danych makroekonomicznych osiągnął nieco gorsze wyniki
+
+Można więc stwierdzić, że w przypadku jednodniowego prognozowania ceny PZU bardziej rozbudowane modele nie były wyraźnie lepsze od modelu naiwnego. Dane makroekonomiczne mogą mieć większe znaczenie w analizie miesięcznej lub kwartalnej, ponieważ zmieniają się znacznie wolniej niż dzienne ceny akcji
+
 
 ::: {.content-visible when-format="pdf"}
 # Bibliografia {.unnumbered}
