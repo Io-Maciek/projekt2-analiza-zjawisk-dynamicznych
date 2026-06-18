@@ -753,54 +753,189 @@ if (FORMAT == "html") {
 
 ## Model VAR (B)
 
+Model VAR(B) rozszerza VAR(A) o trzy zmienne makroekonomiczne: **PKB** (kwartalne), **inflację** i **stopę bezrobocia** (miesięczne). Pojawia się problem różnych częstotliwości — dane giełdowe są dzienne, a makro kwartalne/miesięczne — który trzeba uzgodnić.
+
+**Synchronizacja: schodkowa (`na.locf`), nie interpolacja liniowa.** Każdą wartość makro przenosimy w dni do kolejnego odczytu (funkcja `synchronizuj_z_gielda` z wcześniejszego kroku). Interpolacja liniowa byłaby błędem metodologicznym: żeby „połączyć" kwartał Q z Q+1, trzeba znać wartość z Q+1, czyli z **przyszłości** — w prognozie pozapróbkowej to *look-ahead bias*, który sztucznie zawyżyłby wyniki. Schodek używa wyłącznie ostatniego **już opublikowanego** odczytu, więc respektuje zbiór informacji dostępny w danym dniu.
+
+Dodatkowo zmiany makro (różnice, potrzebne do stacjonarności) liczymy na **natywnej** częstotliwości, a dopiero potem rozciągamy schodkowo. Gdybyśmy różnicowali już rozciągnięty dzienny poziom, różnica byłaby zerem przez ~96% dni (martwy regresor) — tak liczona zmiana jest stała w obrębie okresu i niesie informację o ostatnim odczytanym tempie zmian.
+
+### Tworzenie modelu
 
 ```{r}
+#| code-summary: "Budowa zmiennych VAR(B): giełda + makro (schodkowo)"
 # Autor: Maciej Kuchcik
 
+# Dzienny indeks sesji giełdowych (na niego synchronizujemy makro)
+daty_gielda <- index(pzu_final)
 
-```
+# Zmiany makro liczone na NATYWNEJ częstotliwości, potem rozciągnięte SCHODKOWO:
+# diff PRZED synchronizacją -> unikamy zdegenerowanego (prawie zerowego) diff dziennego.
+pkb_d_daily      <- synchronizuj_z_gielda(diff(log(pkb_final)), daty_gielda)  # wzrost PKB (kw.)
+inflacja_d_daily <- synchronizuj_z_gielda(diff(inflacja_final), daty_gielda)  # zmiana indeksu cen (mies.)
+bezrob_d_daily   <- synchronizuj_z_gielda(diff(bezrobocie_final), daty_gielda) # zmiana stopy bezrob. (mies.)
 
-```{r}
+dane_var_B <- merge(
+  zamkniecia = diff(log(all_data$PZU.WA.Close)),
+  najwyzsze  = diff(log(all_data$PZU.WA.High)),
+  najnizsze  = diff(log(all_data$PZU.WA.Low)),
+  wolumen    = diff(log(all_data$PZU.WA.Volume + 1)),
+  pkb        = pkb_d_daily,
+  bezrob     = bezrob_d_daily,
+  inflacja   = inflacja_d_daily
+)
+# merge.xts zachowuje oryginalne nazwy kolumn - wymuszamy własne
+colnames(dane_var_B) <- c("zamkniecia", "najwyzsze", "najnizsze", "wolumen",
+                          "pkb", "bezrob", "inflacja")
 
-```
+# usuwamy NA z różnicowania/synchronizacji oraz wartości niefinitowe
+dane_var_B <- dane_var_B[apply(dane_var_B, 1, function(r) all(is.finite(r))), ]
 
-```{r}
+# Podział wg tej samej granicy daty co 80/20
+koniec_train <- end(all_data_train)
+var_B      <- dane_var_B[index(dane_var_B) <= koniec_train]
+var_B_test <- dane_var_B[index(dane_var_B) >  koniec_train]
 
-sprawdz_stacjonarnosc <- function(series) {
-  test_wynik <- adf.test(series, alternative = "stationary")
-  cat("Szereg:", deparse(substitute(series)), "\n")
-  cat("P-value:", test_wynik$p.value, "\n")
-  
-  if(test_wynik$p.value < 0.05) {
-    cat("Wniosek: Szereg jest STACJONARNY (odrzucamy hipotezę o pierwiastku jednostkowym).\n\n")
-  } else {
-    cat("Wniosek: Szereg NIE jest stacjonarny (brak podstaw do odrzucenia hipotezy).\n\n")
-  }
+# Stacjonarność wszystkich zmiennych
+stacjonarnosc_var_B <- sprawdz_wszystkie(var_B)
+if (!all(stacjonarnosc_var_B == 1)) {
+  warning("Uwaga: nie wszystkie zmienne VAR(B) wyszły stacjonarne w teście ADF.")
 }
+all(stacjonarnosc_var_B == 1)
+```
 
-# Sprawdzenie Twoich zmiennych (używając all_data z poprzedniego kroku)
-sprawdz_stacjonarnosc(na.omit(all_data$PZU.WA.Close))
-sprawdz_stacjonarnosc(na.omit(all_data$PKB))
-# sprawdz_stacjonarnosc(na.omit(all_data$Inflacja))
+### Predykcja
+
+```{r}
+#| code-summary: "Dobór optymalnego rzędu VAR(B)"
+var_select_B <- VARselect(var_B, lag.max = 10, type = "const")
+p_opt_B <- as.integer(var_select_B$selection["AIC(n)"])
+cat("Optymalny rząd VAR(B) (AIC):", p_opt_B, "\n")
 ```
 
 ```{r}
-
-pzu_ret <- diff(log(all_data$PZU.WA.Close))
-
-# 2. PKB -> Procentowa zmiana kwartalna (lub różnice w logarytmach)
-pkb_diff <- diff(log(all_data$PKB))
-
-# 3. Inflacja i Bezrobocie -> Zazwyczaj wystarczy zwykła różnica (diff)
-inflacja_diff <- diff(all_data$Inflacja)
-bezrobocie_diff <- diff(all_data$Bezrobocie)
-
-
-sprawdz_stacjonarnosc(na.omit(pzu_ret))
-sprawdz_stacjonarnosc(na.omit(pkb_diff))
-sprawdz_stacjonarnosc(na.omit(inflacja_diff))
-sprawdz_stacjonarnosc(na.omit(bezrobocie_diff))
+#| code-summary: "Estymacja VAR(B) na całym treningu"
+model_var_B <- VAR(var_B, p = p_opt_B, type = "const")
+summary(model_var_B)
 ```
+
+```{r}
+#| code-summary: "Inicjalizacja"
+n_test_var_B <- nrow(var_B_test)
+prognozy_B   <- numeric(n_test_var_B)
+```
+
+```{r}
+#| code-summary: "Rekursywna prognoza VAR(B) na zbiorze testowym"
+#| cache: true
+# Ta sama logika co w VAR(A): okno rozszerzane, reestymacja w każdym kroku.
+historia_B <- as.data.frame(var_B)
+
+for (i in seq_len(n_test_var_B)) {
+  dodatkowe_dane <- if (i > 1) {
+    as.data.frame(var_B_test)[seq_len(i - 1), , drop = FALSE]
+  } else NULL
+
+  okno <- rbind(historia_B, dodatkowe_dane)
+
+  model_tmp     <- VAR(okno, p = p_opt_B, type = "const")
+  pred          <- predict(model_tmp, n.ahead = 1)
+  prognozy_B[i] <- pred$fcst$zamkniecia[1, "fcst"]
+}
+```
+
+```{r}
+#| code-summary: "Metryki VAR(B) w zł (porównywalne z A i naiwnym)"
+daty_test_B <- index(var_B_test)
+
+cena_real_B <- as.numeric(all_data$PZU.WA.Close[daty_test_B])
+cena_prev_B <- as.numeric(lag(all_data$PZU.WA.Close, k = 1)[daty_test_B])
+cena_pred_var_B <- cena_prev_B * exp(prognozy_B)
+
+e_var_B <- cena_real_B - cena_pred_var_B
+
+metryki_var_B <- c(
+  MAE  = mean(abs(e_var_B)),
+  RMSE = sqrt(mean(e_var_B^2)),
+  MAPE = mean(abs(e_var_B / cena_real_B)) * 100
+)
+
+cat("\nMetryki VAR(B) na zbiorze testowym (zł):\n")
+print(metryki_var_B)
+```
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'VAR(B) - predykcja vs rzeczywistość (zbiór testowy)' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "Wykres predykcji VAR(B)"
+# Autor: Maciej Kuchcik
+
+if (FORMAT == "html") {
+  df_test_B <- data.frame(
+    x           = as.numeric(as.POSIXct(daty_test_B)) * 1000,
+    rzeczywiste = cena_real_B,
+    prognoza    = cena_pred_var_B,
+    blad        = e_var_B
+  )
+
+  highchart() |>
+    hc_title(text = "VAR(B) — predykcja vs rzeczywistość (zbiór testowy)") |>
+    hc_xAxis(type = "datetime") |>
+    hc_yAxis_multiples(
+      list(title = list(text = "Cena zamknięcia (zł)"), opposite = FALSE),
+      list(title = list(text = "Błąd (zł)"), opposite = TRUE, gridLineWidth = 0)
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_test_B$x, y = df_test_B$rzeczywiste)),
+      type = "line", name = "Rzeczywista", color = "#2196F3", yAxis = 0
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_test_B$x, y = df_test_B$prognoza)),
+      type = "line", name = "Prognoza VAR(B)", color = "#FF9800",
+      dashStyle = "ShortDash", yAxis = 0
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_test_B$x, y = df_test_B$blad)),
+      type = "line", name = "Błąd", color = "rgba(229,57,53,0.5)", yAxis = 1
+    ) |>
+    hc_tooltip(valueDecimals = 2, valueSuffix = " zł", shared = TRUE) |>
+    hc_legend(enabled = TRUE) |>
+    hc_rangeSelector(enabled = TRUE) |>
+    hc_scrollbar(enabled = TRUE)
+
+} else {
+  par(bg = "white", col.axis = "black", col.lab = "black",
+      col.main = "black", fg = "black")
+
+  plot(daty_test_B, cena_real_B,
+       type = "l", col = "royalblue", lwd = 1.5,
+       xlab = "Data", ylab = "Cena zamknięcia (zł)",
+       main = "VAR(B) — predykcja vs rzeczywistość")
+  lines(daty_test_B, cena_pred_var_B, col = "tomato", lwd = 1.5, lty = 2)
+  grid(col = "#cccccc")
+
+  par(new = TRUE)
+  plot(daty_test_B, e_var_B, type = "l",
+       col = adjustcolor("red3", alpha.f = 0.4), lwd = 1,
+       axes = FALSE, xlab = "", ylab = "")
+  axis(4, col = "red3", col.axis = "red3")
+  mtext("Błąd (zł)", side = 4, line = 3, col = "red3")
+
+  legend("topleft",
+         legend = c("Rzeczywista", "Prognoza VAR(B)", "Błąd"),
+         col    = c("royalblue", "tomato", "red3"),
+         lty    = c(1, 2, 1), lwd = 2, bty = "n")
+}
+```
+
+**Wynik:** dołożenie danych makroekonomicznych **nie poprawia** prognozy — VAR(B) wypada wręcz minimalnie gorzej od modelu naiwnego i od VAR(A):
+
+| Model | MAE (zł) | RMSE (zł) | MAPE |
+|---|---|---|---|
+| Naiwny | 0.522 | 0.740 | 1.31% |
+| VAR(A) — giełda | 0.523 | 0.740 | 1.31% |
+| VAR(B) — giełda + makro | 0.528 | 0.745 | 1.33% |
+
+Powód jest spójny z wcześniejszą diagnozą: dane makro zmieniają się wolno (kwartalnie/miesięcznie) i po synchronizacji schodkowej są w obrębie okresu stałe — nie niosą więc informacji o *dziennych* ruchach kursu. Dołożenie trzech zmiennych i dodatkowych parametrów (przy $p=10$) lekko pogarsza wynik pozapróbkowy (delikatne przeuczenie). Wniosek: na częstotliwości dziennej makro nie pomaga przewidywać kursu PZU — różnice między modelami mieszczą się w granicach szumu, a najprostszy model naiwny pozostaje twardym benchmarkiem. Po informację makro o wyższej wartości predykcyjnej należałoby sięgnąć po model jawnie mieszanej częstotliwości (np. MIDAS) zamiast wtłaczać miesięczne/kwartalne dane do dziennego VAR-a.
 
 # Wyniki
 
