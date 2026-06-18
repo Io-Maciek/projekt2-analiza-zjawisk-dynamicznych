@@ -801,3 +801,4 @@ Powód jest spójny z wcześniejszą diagnozą: dane makro zmieniają się wolno
 \renewcommand{\listfigurename}{Spis rysunków}
 \listoffigures
 ```
+
