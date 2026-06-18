@@ -378,7 +378,7 @@ Dane zostają podzielone chronologicznie na trzy rozłączne zbiory:
 ```{r}
 #| code-summary: "Podział danych na 70-20-10%"
 # Autor: Maciej Kuchcik
-
+# TODO - podzial na 3 zbiory jest wgl niepotrzebny
 n <- nrow(all_data)
 
 n_train <- floor(0.70 * n)
@@ -427,15 +427,32 @@ pzu_train <- all_data_train$PZU.WA.Close
 pzu_val   <- all_data_val$PZU.WA.Close
 pzu_test  <- all_data_test$PZU.WA.Close
 
+
 pzu_test_pred<-lag(all_data$PZU.WA.Close, k = 1)[(n_train + n_val + 1):n, ]
 pzu_test_real<-pzu_test
 e<-as.numeric(pzu_test_real) - as.numeric(pzu_test_pred)
-
 metryki_naiwny <- c(
     MAE  = mean(abs(e)), 
     RMSE = sqrt(mean(e^2)), 
     MAPE = mean(abs(e / as.numeric(pzu_test_real))) * 100
   )
+
+
+
+pzu_val_pred <- lag(all_data$PZU.WA.Close, k = 1)[(n_train + 1):(n_train + n_val), ]
+pzu_val_real <- pzu_val
+
+# Błąd na zbiorze walidacyjnym
+e_2 <- as.numeric(pzu_val_real) - as.numeric(pzu_val_pred)
+
+metryki_naiwny_2 <- c(
+    MAE  = mean(abs(e_2)), 
+    RMSE = sqrt(mean(e_2^2)), 
+    MAPE = mean(abs(e_2 / as.numeric(pzu_val_real))) * 100
+)
+metryki_naiwny_2
+
+
 
 if (FORMAT == "html") {
   # Wykres interaktywny HTML
@@ -716,6 +733,180 @@ if (FORMAT == "html") {
   axis(4, col = "red3", col.axis = "red3")
   mtext("Błąd", side = 4, line = 3, col = "red3")
   
+  legend("topleft",
+         legend = c("Rzeczywista", "Prognoza VAR(A)", "Błąd"),
+         col    = c("royalblue", "tomato", "red3"),
+         lty    = c(1, 2, 1), lwd = 2, bty = "n")
+}
+```
+
+
+## proba 2
+```{r}
+#| code-summary: "Budowa zmiennych stacjonarnych dla VAR(A)"
+# Autor: Maciej Kuchcik
+
+# Transformacje liczymy na PEŁNYM szeregu (to tylko transformacja punktowa,
+# bez przecieku informacji), a dopiero potem dzielimy na train/val.
+# Dzięki temu nie gubimy zwrotu na granicy train/val.
+ret_close <- diff(log(all_data$PZU.WA.Close))
+ret_high  <- diff(log(all_data$PZU.WA.High))
+ret_low   <- diff(log(all_data$PZU.WA.Low))
+ret_vol   <- diff(log(all_data$PZU.WA.Volume + 1))  # +1 chroni przed log(0)
+
+dane_var <- merge(
+  zamkniecia = ret_close,
+  najwyzsze  = ret_high,
+  najnizsze  = ret_low,
+  wolumen    = ret_vol
+)
+# usuwamy NA z różnicowania oraz ewentualne wartości niefinitowe
+dane_var <- dane_var[apply(dane_var, 1, function(r) all(is.finite(r))), ]
+
+# Podział wg tych samych granic dat co podział 70/20/10
+koniec_train <- end(all_data_train)
+koniec_val   <- end(all_data_val)
+
+var_A     <- dane_var[index(dane_var) <= koniec_train]
+var_A_val <- dane_var[index(dane_var) >  koniec_train &
+                      index(dane_var) <= koniec_val]
+
+# Wszystkie zmienne VAR(A) powinny być stacjonarne (zwroty/różnice logarytmów)
+stacjonarnosc_var_A <- sprawdz_wszystkie(var_A)
+if (!all(stacjonarnosc_var_A == 1)) {
+  warning("Uwaga: nie wszystkie zmienne VAR(A) wyszły stacjonarne w teście ADF.")
+}
+all(stacjonarnosc_var_A == 1)
+```
+
+
+```{r}
+#| code-summary: "Dobór optymalnego rzędu VAR"
+var_select <- VARselect(var_A, lag.max = 10, type = "const")
+p_opt <- as.integer(var_select$selection["AIC(n)"])
+cat("Optymalny rząd VAR (AIC):", p_opt, "\n")
+```
+
+```{r}
+#| code-summary: "Estymacja VAR(A) na całym treningu"
+model_var_A <- VAR(var_A, p = p_opt, type = "const")
+summary(model_var_A)
+```
+
+```{r}
+n_val_var <- nrow(var_A_val)   # NIE nadpisujemy globalnego n_val
+prognozy  <- numeric(n_val_var)
+```
+
+```{r}
+#| code-summary: "Rekursywna prognoza VAR(A) na zbiorze walidacyjnym"
+# Startujemy z PEŁNEGO treningu i rozszerzamy okno o kolejne zrealizowane
+# obserwacje walidacyjne (expanding window, recursive one-step-ahead).
+historia <- as.data.frame(var_A)
+
+for (i in seq_len(n_val_var)) {
+  dodatkowe_dane <- if (i > 1) {
+    as.data.frame(var_A_val)[seq_len(i - 1), , drop = FALSE]
+  } else NULL
+
+  okno <- rbind(historia, dodatkowe_dane)
+
+  model_tmp   <- VAR(okno, p = p_opt, type = "const")
+  pred        <- predict(model_tmp, n.ahead = 1)
+  prognozy[i] <- pred$fcst$PZU.WA.Close[1, "fcst"]   # POPRAWIONA nazwa kolumny
+}
+```
+
+```{r}
+#| code-summary: "Metryki VAR(A) i naiwnego w zł (porównywalne)"
+daty_val  <- index(var_A_val)
+
+# Cena rzeczywista w dniu t oraz cena z dnia poprzedniego (t-1)
+cena_real <- as.numeric(all_data$PZU.WA.Close[daty_val])
+cena_prev <- as.numeric(lag(all_data$PZU.WA.Close, k = 1)[daty_val])
+
+# Prognoza ceny: wczorajsza cena * exp(prognozowany log-zwrot)
+cena_pred_var <- cena_prev * exp(prognozy)
+
+# Błędy w złotówkach
+e_var    <- cena_real - cena_pred_var
+e_naiwny <- cena_real - cena_prev   # model naiwny: predykcja = cena wczorajsza
+
+metryki_var_A <- c(
+  MAE  = mean(abs(e_var)),
+  RMSE = sqrt(mean(e_var^2)),
+  MAPE = mean(abs(e_var / cena_real)) * 100
+)
+
+metryki_naiwny_val <- c(
+  MAE  = mean(abs(e_naiwny)),
+  RMSE = sqrt(mean(e_naiwny^2)),
+  MAPE = mean(abs(e_naiwny / cena_real)) * 100
+)
+
+cat("\nMetryki VAR(A) na zbiorze walidacyjnym (zł):\n")
+print(metryki_var_A)
+cat("\nMetryki modelu naiwnego na zbiorze walidacyjnym (zł):\n")
+print(metryki_naiwny_val)
+```
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'VAR(A) - predykcja vs rzeczywistość (zbiór walidacyjny)' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "Wykres predykcji VAR(A)"
+# Autor: Maciej Kuchcik
+
+if (FORMAT == "html") {
+  df_val <- data.frame(
+    x           = as.numeric(as.POSIXct(daty_val)) * 1000,
+    rzeczywiste = cena_real,
+    prognoza    = cena_pred_var,
+    blad        = e_var
+  )
+
+  highchart() |>
+    hc_title(text = "VAR(A) — predykcja vs rzeczywistość (zbiór walidacyjny)") |>
+    hc_xAxis(type = "datetime") |>
+    hc_yAxis_multiples(
+      list(title = list(text = "Cena zamknięcia (zł)"), opposite = FALSE),
+      list(title = list(text = "Błąd (zł)"), opposite = TRUE, gridLineWidth = 0)
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_val$x, y = df_val$rzeczywiste)),
+      type = "line", name = "Rzeczywista", color = "#2196F3", yAxis = 0
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_val$x, y = df_val$prognoza)),
+      type = "line", name = "Prognoza VAR(A)", color = "#FF9800",
+      dashStyle = "ShortDash", yAxis = 0
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_val$x, y = df_val$blad)),
+      type = "line", name = "Błąd", color = "rgba(229,57,53,0.5)", yAxis = 1
+    ) |>
+    hc_tooltip(valueDecimals = 2, valueSuffix = " zł", shared = TRUE) |>
+    hc_legend(enabled = TRUE) |>
+    hc_rangeSelector(enabled = TRUE) |>
+    hc_scrollbar(enabled = TRUE)
+
+} else {
+  par(bg = "white", col.axis = "black", col.lab = "black",
+      col.main = "black", fg = "black")
+
+  plot(daty_val, cena_real,
+       type = "l", col = "royalblue", lwd = 1.5,
+       xlab = "Data", ylab = "Cena zamknięcia (zł)",
+       main = "VAR(A) — predykcja vs rzeczywistość")
+  lines(daty_val, cena_pred_var, col = "tomato", lwd = 1.5, lty = 2)
+  grid(col = "#cccccc")
+
+  par(new = TRUE)
+  plot(daty_val, e_var, type = "l",
+       col = adjustcolor("red3", alpha.f = 0.4), lwd = 1,
+       axes = FALSE, xlab = "", ylab = "")
+  axis(4, col = "red3", col.axis = "red3")
+  mtext("Błąd (zł)", side = 4, line = 3, col = "red3")
+
   legend("topleft",
          legend = c("Rzeczywista", "Prognoza VAR(A)", "Błąd"),
          col    = c("royalblue", "tomato", "red3"),
