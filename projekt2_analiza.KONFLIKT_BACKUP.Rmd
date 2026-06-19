@@ -1,0 +1,1119 @@
+---
+title: "Predykcja cen akcji spółki PZU oraz korelacja z czynnikimi gospodarczymi"
+subtitle: "Analiza i prognozowanie wielowymiarowego szeregu czasowego"
+author:
+  - name: "Maciej Kuchcik"
+  - name: "Andrzej Szuwald"
+    affiliation:
+      - "Uniwersytet Ekonomiczny w Katowicach"
+      - "Analiza zjawisk dynamicznych"
+title-block-banner: true
+format:
+  html:
+    output-file: "wybor_tematu.html"
+    code-fold: true
+    other-links: false
+    code-block-bg: true
+    code-block-border-left: "#666666"
+    theme:
+      light: [flatly,arrow]
+      dark: [darkly,dark]
+    toc: true
+    toc-depth: 5
+    toc-expand: 5
+    embed-resources: true
+    respect-user-color-scheme: true
+    include-in-header:
+      text: |
+        <style>
+          .quarto-color-scheme-toggle {
+            position: fixed !important;
+            top: 20px;
+            right: 20px;
+            z-index: 1000; /* Keeps it on top of all text and elements */
+            background: rgba(255, 255, 255, 0.8); /* Slight background so text doesn't clash */
+            padding: 5px 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+          }
+          /* Adjust background for dark mode compatibility */
+          .quarto-dark .quarto-color-scheme-toggle {
+            background: rgba(33, 33, 33, 0.8);
+          }
+        </style>
+  pdf:
+    toc: true
+    bibliography: bibliografia.bib
+    csl: apa.csl
+    number-sections: true
+    colorlinks: true
+    pdf-engine: xelatex
+    documentclass: scrartcl
+    papersize: letter
+    lof: false
+    mainfont: "Times New Roman"
+    sansfont: "Times New Roman"
+    header-includes:
+      - \addtokomafont{disposition}{\rmfamily}
+      - \addtokomafont{caption}{\rmfamily}
+      - \addtokomafont{captionlabel}{\rmfamily}
+      - \usepackage{etoolbox}
+      - \usepackage{fancyhdr}
+      - \pretocmd{\section}{\clearpage}{}{}
+      - \let\oldlistoffigures\listoffigures
+      - \renewcommand{\listoffigures}{{\rmfamily\oldlistoffigures}}
+      - \KOMAoptions{listof=totoc}
+      - \usepackage{hyperref}
+      - \hypersetup{linkcolor=black, urlcolor=black, citecolor=black}
+      - \pagestyle{fancy}
+      - \fancyhf{}
+      - \fancyfoot[R]{\thepage}
+      - \renewcommand{\headrulewidth}{0pt}
+      - \fancypagestyle{plain}{\fancyhf{}\fancyfoot[R]{\thepage}\renewcommand{\headrulewidth}{0pt}}
+      - \AtBeginDocument{\thispagestyle{empty}\setcounter{page}{0}}
+      - \fancypagestyle{empty}{\fancyhf{}\renewcommand{\headrulewidth}{0pt}}
+      - \fancypagestyle{plain}{\fancyhf{}\renewcommand{\headrulewidth}{0pt}}
+date: "`r Sys.Date()`"
+published-title: "DATA"
+lang: pl
+---
+
+# Inicjalizacja {.unnumbered}
+
+W tej części ładowane są biblioteki oraz inicjalizowane są zmienne.
+
+Zmienna $FORMAT$ jest flagą, która wskazuje jaki silnik został wykorzystany podczas renderowania. Wykorzystane jest to podczas tworzenia wykresów. Język R wtedy decyduje, czy wyrenderować wersję internetową (HTML: grafy interaktywne, zmieniające kolor w zależności od motywu), lub dokumentową (PDF: stałe zdjęcia).
+
+```{r}
+#| code-fold: TRUE
+#| code-summary: "Import bibliotek"
+#| echo: true
+#| results: "hide"
+#| warning: false
+#| message: false
+if (!require("quantmod")) install.packages("quantmod")
+library(quantmod)
+library(ggplot2)
+if (!require("readxl")) install.packages("readxl")
+library(readxl)
+if (!require("tseries")) install.packages("tseries")
+library(tseries)
+if (!require("highcharter")) install.packages("highcharter")
+library("highcharter")
+if (!require("forecast")) install.packages("forecast")
+library(forecast)
+#if (!require("midasr")) install.packages("midasr")
+#library(midasr)
+if (!require("vars")) install.packages("vars")
+library(vars)
+
+options(highcharter.lang = list(
+    months = c("Styczeń", "Luty", "Marzec", "Kwiecień", "Maj", "Czerwiec", 
+               "Lipiec", "Sierpień", "Wrzesień", "Październik", 
+               "Listopad", "Grudzień"),
+    shortMonths = c("Sty", "Lut", "Mar", "Kwi", "Maj", "Cze", 
+                    "Lip", "Sie", "Wrz", "Paź", "Lis", "Gru"),
+    weekdays = c("Niedziela", "Poniedziałek", "Wtorek", "Środa", "Czwartek", 
+                 "Piątek", "Sobota"),
+    shortWeekdays = c("Nie", "Pon", "Wto", "Śro", "Czw", "Pią", "Sob"),
+    rangeSelectorFrom = "Od",
+    rangeSelectorTo = "Do",
+    rangeSelectorZoom = "Zakres",
+    loading = "Ładowanie..."
+  )
+)
+
+FORMAT<-knitr::pandoc_to()
+if (is.null(FORMAT)) {
+  FORMAT <- "html"
+}
+```
+
+```{r}
+#| code-summary: "Funkcja 'rysuj_rdzen'"
+rysuj_rdzen <- function(dane_ts, tytul, etykieta_y, kolory) {
+  plot(dane_ts, xlab = "Rok", ylab = etykieta_y, 
+       main = tytul, col = kolory$linia, lwd = 2)
+  grid(col = kolory$siatka)
+  
+  start_zagrozenia <- 2020 + (3 - 1) / 12
+  koniec_zagrozenia <- 2023 + (6 - 1) / 12
+  
+  rect(start_zagrozenia, par("usr")[3], koniec_zagrozenia, par("usr")[4], 
+       col = rgb(1, 0, 0, 0.12), border = NA)
+  
+  legend("topleft", legend = "COVID", fill = rgb(1, 0, 0, 0.12), 
+         border = NA, bty = "n")
+}
+
+rysuj_makro_wykres <- function(dane_ts, tytul, etykieta_y, format = "pdf") {
+  # Zawsze: jasna
+  jasne_kolory <- list(linia = "royalblue", siatka = "#cccccc")
+  par(bg = "white", col.axis = "black", col.lab = "black", 
+      col.main = "black", fg = "black")
+  rysuj_rdzen(dane_ts, ifelse(format == "html", tytul, ""),
+              
+              etykieta_y, jasne_kolory)
+  
+  # HTML: rysujemy też wersję ciemną
+  if (format == "html") {
+    par(bg = "#222222", col.axis = "#dddddd", col.lab = "#dddddd", 
+        col.main = "#dddddd", fg = "#dddddd")
+    ciemne_kolory <- list(linia = "#6baed6", siatka = "#444444")
+    rysuj_rdzen(dane_ts, tytul, etykieta_y, ciemne_kolory)
+    
+    # Reset po HTML
+    par(bg = "white", col.axis = "black", col.lab = "black", 
+        col.main = "black", fg = "black")
+  }
+}
+```
+
+<<<<<<< Updated upstream
+=======
+```{r}
+#| code-summary: "Funkcja 'wykres_predykcji'"
+# Autor: Maciej Kuchcik
+
+wykres_predykcji <- function(daty, cena_real, cena_pred, blad,
+                              tytul, nazwa_modelu, format = FORMAT) {
+  if (format == "html") {
+    df <- data.frame(
+      x           = as.numeric(as.POSIXct(daty)) * 1000,
+      rzeczywiste = cena_real,
+      prognoza    = cena_pred,
+      blad        = blad
+    )
+    highchart() |>
+      hc_title(text = tytul) |>
+      hc_xAxis(type = "datetime") |>
+      hc_yAxis_multiples(
+        list(title = list(text = "Cena zamknięcia (zł)"), opposite = FALSE),
+        list(title = list(text = "Błąd (zł)"), opposite = TRUE, gridLineWidth = 0)
+      ) |>
+      hc_add_series(
+        data = list_parse2(data.frame(x = df$x, y = df$rzeczywiste)),
+        type = "line", name = "Rzeczywista", color = "#2196F3", yAxis = 0
+      ) |>
+      hc_add_series(
+        data = list_parse2(data.frame(x = df$x, y = df$prognoza)),
+        type = "line", name = paste0("Prognoza ", nazwa_modelu),
+        color = "#FF9800", dashStyle = "ShortDash", yAxis = 0
+      ) |>
+      hc_add_series(
+        data = list_parse2(data.frame(x = df$x, y = df$blad)),
+        type = "line", name = "Błąd", color = "rgba(229,57,53,0.5)", yAxis = 1
+      ) |>
+      hc_tooltip(valueDecimals = 2, valueSuffix = " zł", shared = TRUE) |>
+      hc_legend(enabled = TRUE) |>
+      hc_rangeSelector(enabled = TRUE) |>
+      hc_scrollbar(enabled = TRUE)
+  } else {
+    par(bg = "white", col.axis = "black", col.lab = "black",
+        col.main = "black", fg = "black")
+    plot(daty, cena_real, type = "l", col = "royalblue", lwd = 1.5,
+         xlab = "Data", ylab = "Cena zamknięcia (zł)", main = tytul)
+    lines(daty, cena_pred, col = "tomato", lwd = 1.5, lty = 2)
+    grid(col = "#cccccc")
+    par(new = TRUE)
+    plot(daty, blad, type = "l", col = adjustcolor("red3", alpha.f = 0.4),
+         lwd = 1, axes = FALSE, xlab = "", ylab = "")
+    axis(4, col = "red3", col.axis = "red3")
+    mtext("Błąd (zł)", side = 4, line = 3, col = "red3")
+    legend("topleft",
+           legend = c("Rzeczywista", paste0("Prognoza ", nazwa_modelu), "Błąd"),
+           col = c("royalblue", "tomato", "red3"),
+           lty = c(1, 2, 1), lwd = 2, bty = "n")
+  }
+}
+```
+
+```{r}
+#| code-summary: "Funkcja 'oblicz_metryki'"
+# Autor: Maciej Kuchcik
+
+oblicz_metryki <- function(blad, cena_real) {
+  c(
+    MAE  = mean(abs(blad)),
+    RMSE = sqrt(mean(blad^2)),
+    MAPE = mean(abs(blad / cena_real)) * 100
+  )
+}
+```
+
+```{r}
+#| code-summary: "Funkcja 'prognoza_var_rekursywna'"
+# Autor: Maciej Kuchcik
+
+prognoza_var_rekursywna <- function(historia_df, test_xts, p_opt) {
+  n <- nrow(test_xts)
+  prognozy <- numeric(n)
+  for (i in seq_len(n)) {
+    dodatkowe <- if (i > 1) as.data.frame(test_xts)[seq_len(i - 1), , drop = FALSE] else NULL
+    okno <- rbind(historia_df, dodatkowe)
+    model_tmp <- VAR(okno, p = p_opt, type = "const")
+    pred <- predict(model_tmp, n.ahead = 1)
+    prognozy[i] <- pred$fcst$zamkniecia[1, "fcst"]
+  }
+  prognozy
+}
+```
+
+```{r}
+#| code-summary: "Funkcja 'estymuj_var'"
+# Autor: Maciej Kuchcik
+
+estymuj_var <- function(dane, lag.max = 10) {
+  p_opt <- as.integer(VARselect(dane, lag.max = lag.max, type = "const")$selection["AIC(n)"])
+  cat("Optymalny rząd VAR (AIC):", p_opt, "\n")
+  list(
+    model = VAR(dane, p = p_opt, type = "const"),
+    p_opt = p_opt
+  )
+}
+```
+
+```{r}
+#| code-summary: "Funkcja 'wykres_acf_pacf'"
+# Autor: Maciej Kuchcik
+
+# Rysuje obok siebie ACF i PACF jednego szeregu. Jak rysuj_makro_wykres:
+# zawsze wersja jasna, a w HTML dodatkowo ciemna (przełączana motywem).
+wykres_acf_pacf <- function(series, tytul, lag_max = 40, format = FORMAT) {
+  s <- as.numeric(na.omit(series))
+  rdzen <- function(kolory) {
+    op <- par(mfrow = c(1, 2), bg = kolory$bg, col.axis = kolory$fg,
+              col.lab = kolory$fg, col.main = kolory$fg, fg = kolory$fg)
+    on.exit(par(op), add = TRUE)
+    acf(s,  main = paste("ACF:",  tytul), lag.max = lag_max, col = kolory$linia, lwd = 2)
+    pacf(s, main = paste("PACF:", tytul), lag.max = lag_max, col = kolory$linia, lwd = 2)
+  }
+  rdzen(list(bg = "white", fg = "black", linia = "royalblue"))
+  if (format == "html") {
+    rdzen(list(bg = "#222222", fg = "#dddddd", linia = "#6baed6"))
+  }
+}
+```
+
+>>>>>>> Stashed changes
+# Wstęp
+
+## Cel {#cel}
+
+W tym projekcie porównamy różne metody predykcji akcji giełdowych spółki **PZU** (Powszechny Zakład Ubezpieczeń S.A.) oraz zbadamy wpływ dodania innych zmiennych na jakość danych wyjściowych.
+
+Badanie rozpocznie się od stworzenia modelu naiwnego (bazowego), do którego porównywać się będą inne metryki. Model ten będzie zakładał, że $$\text{predykowana cena} = \text{cena wczorajsza}$$ Następnie zostana wykorzystane bardziej złożone funkcje jak $VAR$ czy $ARIMAX$ (*przez autoarime*), do których później dodatkowo zostaną dołożone kolejne wymiary (np. dane o inflacji, stopie bezrobocia czy PKB) aby zweryfikować wpływ danych makroekonomicznych.
+
+## Dane
+
+Dane giełdowe pobrane zostaną pobrane z biblioteki **quantmod** poprzez API Yahoo Finance do GPW (Giełdy Papierów Wartościowych).
+
+### Giełda PZU
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'Wykres akcji spółki PZU' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "Pobranie danych giełdowych"
+# Autor: Maciej Kuchcik
+
+pzu_raw<-getSymbols("PZU.WA", auto.assign = F)
+
+if(FORMAT == "html"){
+  p <- highchart(type = "stock")
+  p <- hc_title(p, text = "Wykres akcji spółki PZU")
+  p <- hc_add_series(p, pzu_raw, name = "Cena")
+  p <- hc_navigator(p, enabled = TRUE)
+  p <- hc_scrollbar(p, enabled = TRUE)
+  
+  p <- hc_yAxis(p, 
+    min = 0, 
+    max = max(Cl(pzu_raw))
+  )
+  
+  p
+}else{
+  chartSeries(pzu_raw, 
+    theme = chartTheme("white"), name = "")
+}
+```
+
+### Wskaźniki makroekonomiczne
+
+Wskaźniki makroekonomiczne zostały pobrane ze strony **GUS** (Główny Urząd Statystyczny) i pliku **Kwartalne wskaźniki makroekonomiczne** lub **Wybrane miesięczne wskaźniki makroekonomiczne** [(@gus_wskazniki_2026)]{.content-visible when-format="pdf"}.
+
+- PKB pobrano z danych kwartalnych z arkusza **RACHUNKI NARODOWE**.
+- Inflacje pobrano z danych miesięcznych z arkusza **WSKAŹNIKI CEN**.
+- Procentową stopę bezrobocia pobrano z danych miesięcznych z arkusza **RYNEK PRACY**.
+
+Te dane zostały następnie przerobione ręcznie do pliku **makro.xlsx** do arkuszy o odpowiednich nazwach.
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'Produkt Krajowy Brutto Polski' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "Pobranie danych o PKB"
+# Autor: Maciej Kuchcik
+
+pkb_raw <- read_excel("makro.xlsx", sheet = "PKB")
+
+rok<-as.numeric(format( min(as.Date(pkb_raw$DATA)), "%Y"))
+kwartal<-(as.numeric(format( min(as.Date(pkb_raw$DATA)),"%m")) - 1) %/% 3 + 1
+
+pkb_ts <- ts(as.numeric(as.character(pkb_raw$WARTOŚĆ)), 
+             frequency = 4, start = c(rok, kwartal))
+rysuj_makro_wykres(pkb_ts/1000, "Produkt Krajowy Brutto Polski", 
+                   "Wartość (mln zł)", FORMAT)
+```
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'Inflacja' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "Pobranie danych o inflacji"
+# Autor: Maciej Kuchcik
+
+inflacja_raw <- read_excel("makro.xlsx", sheet = "Inflacja")
+
+rok<-as.numeric(format( min(as.Date(inflacja_raw$DATA)), "%Y"))
+miesiac<-as.numeric(format( min(as.Date(inflacja_raw$DATA)),"%m"))
+
+inflacja_ts <- ts(as.numeric(as.character(inflacja_raw$WARTOŚĆ)), 
+                  frequency = 12, start = c(rok, miesiac))
+rysuj_makro_wykres(inflacja_ts - 100, "Inflacja", "Inflacja %", FORMAT)
+```
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'Procentowa stopa bezrobocia' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "Pobranie danych o stopie bezrobocia"
+# Autor: Maciej Kuchcik
+
+bezrobocie_raw <- read_excel("makro.xlsx", sheet = "Bezrobocie%")
+
+rok<-as.numeric(format( min(as.Date(bezrobocie_raw$DATA)), "%Y"))
+miesiac<-(as.numeric(format( min(as.Date(bezrobocie_raw$DATA)),"%m")))
+
+bezrobocie_ts <- ts(as.numeric(as.character(bezrobocie_raw$WARTOŚĆ)), 
+                    frequency = 12, start = c(rok, miesiac))
+rysuj_makro_wykres(
+  bezrobocie_ts, "Procentowa stopa bezrobocia", "% stopa bezrobocia", FORMAT)
+```
+
+## Wyznaczenie wspólnego zakresu dat
+
+Należy zbadać, czy wszystkie dane mają tą samą datę początkową i końcą. Jeżeli ich daty się różnią, należy skrócić wszystkie zbiory do największej z daty początkowych oraz najmniejszej z dat końcowych (biorąc pod uwagę różne częstotliwości).
+
+```{r}
+#| code-summary: "Analiza zakresów dat"
+# Autor: Maciej Kuchcik
+
+zbadaj_daty<-function(data_ts) {
+  min_data <- start(data_ts)
+  max_data <- end(data_ts)
+  freq <- frequency(data_ts)
+  
+  freq_name <- switch(as.character(freq),
+                      "1"  = "roczne",
+                      "4"  = "kwartalne",
+                      "12" = "miesięczne",
+                      "52" = "tygodniowe",
+                      "dzienne")
+
+
+cat(sprintf(
+  "Szereg czasowy '%s' trwa od %d-%02d do %d-%02d o częstotliwości: %s.",
+              deparse(substitute(data_ts)), 
+              min_data[1], min_data[2], 
+              max_data[1], max_data[2], 
+              freq_name), "\n")
+}
+
+cat(sprintf(
+  "Dane giełdowe PZU obejmują zakres od %s do %s o częstotliwości: dzienne.",
+            as.character(index(first(pzu_raw))), 
+            as.character(index(last(pzu_raw)))), "\n")
+zbadaj_daty(pkb_ts)
+zbadaj_daty(bezrobocie_ts)
+zbadaj_daty(inflacja_ts)
+```
+
+Początki: 2010-05-11, 2009-01, 2010-01, 2010-01.
+
+- Najpóźniejszy start to **2010-05-11**. Ze względu na szereg kwartalny, musimy zaokrąglić to do najbliższego pełnego okresu: **2010-07-01** (początek trzeciego kwartału). 
+
+Końce: 2026-06-12, 2025-01, 2026-04, 2026-04.
+
+- Najwcześniejszy koniec to **2025-01**. Ze względu na to, że to szereg kwartalny, możemy brać daty aż do końca tego kwartału: **2025-03-31**.
+
+```{r}
+#| code-summary: "Wyfiltrowanie danych do dat"
+# Autor: Maciej Kuchcik
+
+przytnij_dane <- function(data) {
+  start <- as.Date("2010-07-01")
+  end   <- as.Date("2025-03-31")
+  dane_xts <- as.xts(data)
+  index(dane_xts) <- as.Date(index(dane_xts))
+  window(dane_xts, start = start, end = end)
+}
+
+pkb_final        <- przytnij_dane(pkb_ts)
+bezrobocie_final <- przytnij_dane(bezrobocie_ts)
+inflacja_final   <- przytnij_dane(inflacja_ts)
+pzu_final        <- przytnij_dane(pzu_raw)
+```
+
+## Synchronizacja danych
+```{r}
+#| code-summary: "Synchronizacja danych"
+# Autor: Maciej Kuchcik
+
+synchronizuj_z_gielda <- function(macro_xts, target_index) {
+  # 1. merge z pustym (aby zachowac ilosc)
+  # 2. wypelniamy locf, zeby zachowac ostatnia wartosc
+  # 3. filtrjemy przez target (dni w gieldzie-nie dziala np w weekendy)
+  return(na.locf(merge(macro_xts, xts(order.by = target_index)))[target_index])
+}
+index <- index(pzu_final)
+
+pkb_daily        <- synchronizuj_z_gielda(pkb_final, index)
+bezrobocie_daily <- synchronizuj_z_gielda(bezrobocie_final, index)
+inflacja_daily   <- synchronizuj_z_gielda(inflacja_final, index)
+
+c(nrow(pkb_daily), nrow(bezrobocie_daily), 
+  nrow(inflacja_daily), nrow(pzu_final))
+```
+
+```{r}
+#| code-summary: "Stworzenie wspólnej kolekcji"
+# Autor: Maciej Kuchcik
+
+all_data <- merge(pzu_final, pkb_daily, bezrobocie_daily, inflacja_daily)
+names(all_data) <- c("PZU.WA.Open", "PZU.WA.High", "PZU.WA.Low", 
+                     "PZU.WA.Close", "PZU.WA.Volume", "PZU.WA.Adjusted", 
+                     "PKB", "Bezrobocie","Inflacja")
+class(all_data)
+head(all_data)
+```
+
+## Podział danych na zbiór treningowy i testowy
+
+W analizie szeregów czasowych (VAR, ARIMA) standardem jest podział na próbę **wewnątrzpróbkową** (*in-sample*, treningową) oraz **pozapróbkową** (*out-of-sample*, testową). Wszystkie modele porównujemy uczciwie na tym samym zbiorze testowym.
+
+Dane dzielimy chronologicznie w proporcji **80/20**:
+
+- **Treningowy (80%)** - estymacja modeli (*in-sample*),
+- **Testowy (20%)** - ocena jakości predykcji pozapróbkowej (*out-of-sample*).
+
+```{r}
+#| code-summary: "Podział danych na 80-20%"
+# Autor: Maciej Kuchcik
+
+n <- nrow(all_data)
+
+n_train <- floor(0.80 * n)
+n_test  <- n - n_train
+
+all_data_train <- all_data[1:n_train, ]
+all_data_test  <- all_data[(n_train + 1):n, ]
+
+cat(sprintf(
+  "Liczba obserwacji: %d
+    Treningowy (80%%): %d  (%s - %s)
+    Testowy    (20%%): %d  (%s - %s)\n",
+  n,
+  nrow(all_data_train), as.character(index(first(all_data_train))),
+    as.character(index(last(all_data_train))),
+  nrow(all_data_test),  as.character(index(first(all_data_test))),
+    as.character(index(last(all_data_test)))
+))
+```
+
+# Analiza i predykcja
+
+Ta częśc projektu zostanie pośwęcona ostatecznej predykcji dziennych cen zamknięcia akcji spółki PZU wykorzystujac coraz to bardziej zaawansowane metody, by zweryfikować, które dane i jak najbardziej wpływają na jakoś danych wyjściowych. Zostanie zastosowana taka kolejność:
+
+1.  **Model naiwny/bazowy:** $\text{predykcja} = \text{wartość wczorajsza}$. Wykorzystane zostaną tylko dane z cen zamknięcia (jeden wymiar, jedna częstotliwość).
+2.  **Model ARIMA:** wykorzystana zostanie *autoarima* na cenach zamknięcia (jeden wymiar, jedna częstotliwość).
+3.  **Model VAR A:** użyje funkcji *VAR* oraz pełnych danych giełdowych z cenami zamknięcia, wolumenem, cenami minimalnymi i maksymalnymi (kilka wymiarów, jedna częstotliwość).
+4.  **Model VAR B:** do danych z **VAR A** dołożone zostaną dane makroekonomiczne (kilka wymiarów, jedna częstotliwość).
+
+## Model naiwny
+
+Jak opisano we [wstępie](#cel), model naiwny (czy też bazowy) będzie zakładał, że $$\text{predykowana cena} = \text{cena wczorajsza}$$ Będzie to model jednowymiarowy, korzystający tylko z cen zamknięcia i posłuży jako baseline (wartość porównawcza) do predykcji z innych modeli.
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'Model naiwny - predykcja vs rzeczywistość (zbiór testowy)' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "Wykres predykcji i błędów"
+# Autor: Maciej Kuchcik
+
+pzu_train <- all_data_train$PZU.WA.Close
+pzu_test  <- all_data_test$PZU.WA.Close
+
+# Predykcja naiwna = cena wczorajsza (lag o 1 dzień) na zbiorze testowym
+pzu_test_pred <- lag(all_data$PZU.WA.Close, k = 1)[(n_train + 1):n, ]
+pzu_test_real <- pzu_test
+e <- as.numeric(pzu_test_real) - as.numeric(pzu_test_pred)
+
+metryki_naiwny <- c(
+    MAE  = mean(abs(e)),
+    RMSE = sqrt(mean(e^2)),
+    MAPE = mean(abs(e / as.numeric(pzu_test_real))) * 100
+  )
+
+if (FORMAT == "html") {
+  # Wykres interaktywny HTML
+  
+  df_naiwny <- data.frame(
+    data        = index(pzu_test_real),
+    rzeczywiste = as.numeric(pzu_test_real),
+    predykcja   = as.numeric(pzu_test_pred),
+    blad        = e
+  )
+
+  highchart() |>
+    hc_title(text = "Model naiwny - predykcja vs rzeczywistość (zbiór testowy)") |>
+    hc_xAxis(type = "datetime") |>
+    hc_yAxis_multiples(
+      list(title = list(text = "Cena zamknięcia (zł)"), opposite = FALSE,
+           startOnTick = FALSE, endOnTick = FALSE),
+      list(title = list(text = "Błąd (zł)"), opposite = TRUE, gridLineWidth = 0,
+           startOnTick = FALSE, endOnTick = FALSE)
+    ) |>
+    
+    hc_add_series(
+      data = list_parse2(data.frame(
+        x = as.numeric(as.POSIXct(df_naiwny$data)) * 1000,
+        y = df_naiwny$rzeczywiste
+      )),
+      type = "line", name = "Rzeczywista", color = "#2196F3", yAxis = 0
+    ) |>
+    
+    hc_add_series(
+      data = list_parse2(data.frame(
+        x = as.numeric(as.POSIXct(df_naiwny$data)) * 1000,
+        y = df_naiwny$predykcja
+      )),
+      type = "line", name = "Predykcja (naiwna)", color = "#FF9800",
+      dashStyle = "ShortDash", yAxis = 0
+    ) |>
+    
+    hc_add_series(
+      data = list_parse2(data.frame(
+        x = as.numeric(as.POSIXct(df_naiwny$data)) * 1000,
+        y = df_naiwny$blad
+      )),
+      type = "line", name = "Błąd", color = "rgba(229, 57, 53, 0.5)",
+      dashStyle = "Solid", yAxis = 1
+    ) |>
+    
+    hc_tooltip(valueDecimals = 2, valueSuffix = " zł", shared = TRUE) |>
+    hc_legend(enabled = TRUE) |>
+    hc_rangeSelector(enabled = TRUE) |>
+    hc_scrollbar(enabled = TRUE)
+  
+} else {
+  # wykres statyczny dla PDF
+  
+  blad <- e
+  daty <- index(pzu_test_real)
+
+  par(bg = "white", col.axis = "black", 
+      col.lab = "black", col.main = "black", fg = "black"
+  )
+  plot(daty, as.numeric(pzu_test_real),
+       type = "l", col = "royalblue", lwd = 2,
+       xlab = "Data", ylab = "Cena zamknięcia (zł)"
+  )
+  lines(daty, as.numeric(pzu_test_pred), 
+        col = "tomato", lwd = 2, lty = 2
+  )
+  grid(col = "#cccccc")
+
+  # oś Y dla błędu
+  par(new = TRUE)
+  plot(daty, blad,
+     type = "l", col = adjustcolor("red3", alpha.f = 0.5), 
+     lwd = 1.5, lty = 1,
+     axes = FALSE, xlab = "", ylab = ""
+  )
+  axis(4, col = "red3", col.axis = "red3")
+  mtext("Błąd (zł)", side = 4, line = 3, col = "red3")
+
+  legend("topleft",
+         legend = c("Rzeczywista", "Predykcja (naiwna)", "Błąd"),
+         col    = c("royalblue", "tomato", "red3"),
+         lty    = c(1, 2, 1), lwd = 2, bty = "n")
+}
+
+metryki_naiwny
+```
+
+
+**Metryki** (zbiór testowy, ok. 3 lata: 2022-03 – 2025-03):
+
+ - MAE = 0.52 zł - średnio model myli się o ok. 52 grosze,
+ - RMSE = 0.74 zł - większy od MAE, zdarzają się pojedyncze dni z większymi skokami (RMSE karze mocniej za duże błędy),
+ - MAPE = 1.31% - procentowo błąd jest bardzo mały. Przy cenie akcji z zakresu ok. 23–59 zł pomyłka o 1.31% to właśnie około pół złotego.
+
+**Wykres:**
+
+Linia błędu oscyluje blisko zera przez większość okresu, co potwierdza, że ceny PZU zmieniają się powoli i model naiwny dobrze to wykorzystuje. Widoczne są pojedyncze wyraźne skoki błędu, a największy z 16 września 2024 (ok. -7.5 zł), kolejny 6 września 2023 (ok. -3.2 zł). Okazuje się, że to były [dni wypłat dywidend](https://strefainwestorow.pl/notowania/spolki/PLPZU0000011/dywidendy) dla tej spółki, czego model nie mógł przewidzieć.
+
+## Model ARIMA
+TODO
+## Model VAR A
+
+### Testy stacjonarności
+
+```{r}
+#| code-summary: "Testy stacjonarności"
+# Autor: Maciej Kuchcik
+
+czy_stacjonarny <- function(series, nazwa = deparse(substitute(series))) {
+  test_wynik <- suppressWarnings(adf.test(series))
+  p <- test_wynik$p.value
+  p_formatted <- if (p <= 0.01) "< 0.01" else formatC(p, digits = 4, format = "f")
+  
+  if (p < 0.05) {
+    cat(sprintf("%s jest STACJONARNY (%s).\n", nazwa, p_formatted))
+    return(1)
+  } else {
+    cat(sprintf("%s NIE jest stacjonarny (%s).\n", nazwa, p_formatted))
+    return(0)
+  }
+}
+
+sprawdz_wszystkie <- function(data) {
+  wyniki <- sapply(names(data), function(col) {
+    czy_stacjonarny(na.omit(data[, col]), nazwa = col)
+  })
+  return(wyniki)
+}
+
+sprawdz_wszystkie(all_data_train)
+```
+
+Test ADF potwierdza to liczbowo, a wizualnie widać to na korelogramach. Dla **poziomu** ceny zamknięcia autokorelacja (ACF) opada bardzo wolno, a PACF ma silny pik na pierwszym opóźnieniu — typowy obraz szeregu niestacjonarnego z pierwiastkiem jednostkowym:
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'ACF/PACF: cena zamknięcia (poziom)' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "ACF/PACF: poziom ceny zamknięcia"
+# Autor: Maciej Kuchcik
+
+wykres_acf_pacf(all_data_train$PZU.WA.Close, "cena zamknięcia (poziom)")
+```
+
+Po przejściu na **log-zwroty** (`diff(log(...))`) autokorelacja niemal znika — szereg jest stacjonarny i bliski białemu szumowi. To od razu zapowiada, że z samej historii zwrotów trudno cokolwiek przewidzieć (i wyjaśnia późniejszy wynik VAR ≈ model naiwny):
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'ACF/PACF: log-zwroty ceny zamknięcia' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "ACF/PACF: log-zwroty ceny zamknięcia"
+# Autor: Maciej Kuchcik
+
+wykres_acf_pacf(diff(log(all_data_train$PZU.WA.Close)), "log-zwroty zamknięcia")
+```
+
+### Tworzenie modelu
+
+Do modelu VAR(A) trafiają wyłącznie dane giełdowe (kilka wymiarów, jedna częstotliwość). Ceny są niestacjonarne, więc każdą serię sprowadzamy do logarytmicznych stóp zwrotu (`diff(log(...))`). Transformacje liczymy na pełnym szeregu, a dopiero potem dzielimy na trening/test, wtedy nie gubimy zwrotu na granicy podziału.
+
+```{r}
+#| code-summary: "Budowa zmiennych stacjonarnych dla VAR A"
+# Autor: Maciej Kuchcik
+
+ret_close <-diff(log(all_data$PZU.WA.Close))
+ret_high <-diff(log(all_data$PZU.WA.High))
+ret_low <-diff(log(all_data$PZU.WA.Low))
+ret_vol <- diff(log(all_data$PZU.WA.Volume + 1))
+
+dane_var <- merge(
+  zamkniecia = ret_close,
+  najwyzsze= ret_high,
+  najnizsze= ret_low,
+  wolumen =ret_vol
+)
+
+colnames(dane_var) <- c("zamkniecia", "najwyzsze", "najnizsze", "wolumen")
+
+dane_var <- dane_var[apply(dane_var, 1, function(r) all(is.finite(r))), ]
+
+# podzial 80/20
+koniec_train <- end(all_data_train)
+var_A      <- dane_var[index(dane_var) <= koniec_train]
+var_A_test <- dane_var[index(dane_var) >  koniec_train]
+
+stacjonarnosc_var_A <- sprawdz_wszystkie(var_A)
+if (!all(stacjonarnosc_var_A == 1)) {
+  warning("Uwaga: nie wszystkie zmienne VAR(A) wyszły stacjonarne w teście ADF.")
+}
+all(stacjonarnosc_var_A == 1)
+```
+
+### Predykcja
+
+Rząd opóźnień $p$ dobieramy kryterium AIC.
+```{r}
+#| code-summary: "Dobór optymalnego rzędu VAR"
+# Autor: Maciej Kuchcik
+
+var_select <- VARselect(var_A, lag.max = 10, type = "const")
+p_opt <- as.integer(var_select$selection["AIC(n)"])
+cat("Optymalny rząd VAR (AIC):", p_opt, "\n")
+```
+
+```{r}
+#| code-summary: "Estymacja VAR(A) na całym treningu"
+# Autor: Maciej Kuchcik
+
+model_var_A <- VAR(var_A, p = p_opt, type = "const")
+summary(model_var_A)
+```
+
+Prognozę pozapróbkową budujemy rekursywnie, a model estymujemy na zbiorze treningowym i krok po kroku dokładamy kolejne zrealizowane obserwacje testowe, za każdym razem prognozując jeden dzień naprzód (okno rozszerzane).
+
+```{r}
+#| code-summary: "Inicjalizacja"
+# Autor: Maciej Kuchcik
+
+n_test_var <- nrow(var_A_test)
+prognozy   <- numeric(n_test_var)
+```
+
+```{r}
+#| code-summary: "Rekursywna prognoza VAR A na zbiorze testowym"
+#| cache: true
+# Autor: Maciej Kuchcik
+
+historia <- as.data.frame(var_A)
+
+for (i in seq_len(n_test_var)) {
+  dodatkowe_dane <- if (i > 1) {
+    as.data.frame(var_A_test)[seq_len(i - 1), , drop = FALSE]
+  } else NULL
+
+  okno <- rbind(historia, dodatkowe_dane)
+
+  model_tmp<- VAR(okno, p = p_opt, type = "const")
+  pred <- predict(model_tmp, n.ahead = 1)
+  prognozy[i] <- pred$fcst$zamkniecia[1, "fcst"]
+}
+```
+
+Model prognozuje log-stopę zwrotu. Dzięki temu metryki są w złotówkach i wprost porównywalne z modelem naiwnym, liczone na dokładnie tych samych datach.
+
+```{r}
+#| code-summary: "Metryki VAR A i naiwnego w zł (porównywalne)"
+# Autor: Maciej Kuchcik
+
+daty_test <- index(var_A_test)
+
+cena_real<-as.numeric(all_data$PZU.WA.Close[daty_test])
+cena_prev<-as.numeric(lag(all_data$PZU.WA.Close, k = 1)[daty_test])
+
+cena_pred_var <- cena_prev * exp(prognozy)
+
+e_var <- cena_real - cena_pred_var
+e_naiwny <- cena_real - cena_prev   # model naiwny
+
+metryki_var_A <- c(
+  MAE  = mean(abs(e_var)),
+  RMSE = sqrt(mean(e_var^2)),
+  MAPE = mean(abs(e_var / cena_real)) * 100
+)
+
+metryki_naiwny_test <- c(
+  MAE  = mean(abs(e_naiwny)),
+  RMSE = sqrt(mean(e_naiwny^2)),
+  MAPE = mean(abs(e_naiwny / cena_real)) * 100
+)
+
+cat("\nMetryki VAR na zbiorze testowym (zł):\n")
+print(metryki_var_A)
+cat("\nMetryki modelu naiwnego na zbiorze testowym (zł):\n")
+print(metryki_naiwny_test)
+```
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'VAR A: predykcja vs rzeczywistość (zbiór testowy)' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "Wykres predykcji VAR A"
+# Autor: Maciej Kuchcik
+
+if (FORMAT == "html") {
+  df_test <- data.frame(
+    x           = as.numeric(as.POSIXct(daty_test)) * 1000,
+    rzeczywiste = cena_real,
+    prognoza    = cena_pred_var,
+    blad        = e_var
+  )
+
+  highchart() |>
+    hc_title(text = "VAR A: predykcja vs rzeczywistość (zbiór testowy)") |>
+    hc_xAxis(type = "datetime") |>
+    hc_yAxis_multiples(
+      list(title = list(text = "Cena zamknięcia (zł)"), opposite = FALSE),
+      list(title = list(text = "Błąd (zł)"), opposite = TRUE, gridLineWidth = 0)
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_test$x, y = df_test$rzeczywiste)),
+      type = "line", name = "Rzeczywista", color = "#2196F3", yAxis = 0
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_test$x, y = df_test$prognoza)),
+      type = "line", name = "Prognoza VAR(A)", color = "#FF9800",
+      dashStyle = "ShortDash", yAxis = 0
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_test$x, y = df_test$blad)),
+      type = "line", name = "Błąd", color = "rgba(229,57,53,0.5)", yAxis = 1
+    ) |>
+    hc_tooltip(valueDecimals = 2, valueSuffix = " zł", shared = TRUE) |>
+    hc_legend(enabled = TRUE) |>
+    hc_rangeSelector(enabled = TRUE) |>
+    hc_scrollbar(enabled = TRUE)
+
+} else {
+  par(bg = "white", col.axis = "black", col.lab = "black",
+      col.main = "black", fg = "black")
+
+  plot(daty_test, cena_real,
+       type = "l", col = "royalblue", lwd = 1.5,
+       xlab = "Data", ylab = "Cena zamknięcia (zł)",
+       main = "VAR A: predykcja vs rzeczywistość")
+  lines(daty_test, cena_pred_var, col = "tomato", lwd = 1.5, lty = 2)
+  grid(col = "#cccccc")
+
+  par(new = TRUE)
+  plot(daty_test, e_var, type = "l",
+       col = adjustcolor("red3", alpha.f = 0.4), lwd = 1,
+       axes = FALSE, xlab = "", ylab = "")
+  axis(4, col = "red3", col.axis = "red3")
+  mtext("Błąd (zł)", side = 4, line = 3, col = "red3")
+
+  legend("topleft",
+         legend = c("Rzeczywista", "Prognoza VAR(A)", "Błąd"),
+         col    = c("royalblue", "tomato", "red3"),
+         lty    = c(1, 2, 1), lwd = 2, bty = "n")
+}
+```
+
+**Wynik:** VAR na samych danych giełdowych praktycznie nie różni się od modelu naiwnego (MAE: 0,52 zł, RMSE: 0,74 zł, MAPE: 1,31% są prawie identycznie). Dzienne stopy zwrotu PZU są w praktyce nieprzewidywalne na podstawie własnej historii oraz cen max/min i wolumenu, a prognozowany zwrot oscyluje wokół zera, więc predykcja ceny sprowadza się do **ceny wczorajszej**.
+
+## Model VAR B
+
+Model VAR B rozszerza VAR A o trzy zmienne makroekonomiczne: **PKB** (kwartalne), **inflację** i **stopę bezrobocia** (miesięczne). Pojawia się problem różnych częstotliwości. Dane giełdowe są dzienne, a makro kwartalne/miesięczne.
+
+Do tego celu użyta została funkcja schodkowa (`na.locf`), a nie interpolacja liniowa, ponieważ lepiej odwzorowuje to informacje giełdowe (PKB nie jest znane codziennie.)
+
+### Tworzenie modelu
+
+```{r}
+#| code-summary: "Synchronizacja zmiennych schodkowo"
+# Autor: Maciej Kuchcik
+
+daty_gielda <- index(pzu_final)
+
+
+pkb_d_daily <- synchronizuj_z_gielda(diff(log(pkb_final)), daty_gielda)
+inflacja_d_daily <- synchronizuj_z_gielda(diff(inflacja_final), daty_gielda)
+bezrob_d_daily <- synchronizuj_z_gielda(diff(bezrobocie_final), daty_gielda)
+
+dane_var_B <- merge(
+  zamkniecia = diff(log(all_data$PZU.WA.Close)),
+  najwyzsze  = diff(log(all_data$PZU.WA.High)),
+  najnizsze  = diff(log(all_data$PZU.WA.Low)),
+  wolumen    = diff(log(all_data$PZU.WA.Volume + 1)),
+  pkb        = pkb_d_daily,
+  bezrob     = bezrob_d_daily,
+  inflacja   = inflacja_d_daily
+)
+
+colnames(dane_var_B) <- c("zamkniecia", "najwyzsze", "najnizsze", "wolumen",
+                          "pkb", "bezrob", "inflacja")
+
+dane_var_B <- dane_var_B[apply(dane_var_B, 1, function(r) all(is.finite(r))), ]
+
+# podział 80/20
+koniec_train <- end(all_data_train)
+var_B <- dane_var_B[index(dane_var_B) <= koniec_train]
+var_B_test<- dane_var_B[index(dane_var_B) >  koniec_train]
+
+stacjonarnosc_var_B <- sprawdz_wszystkie(var_B)
+if (!all(stacjonarnosc_var_B == 1)) {
+  warning("Uwaga: nie wszystkie zmienne VAR(B) wyszły stacjonarne w teście ADF.")
+}
+all(stacjonarnosc_var_B == 1)
+```
+
+Mimo że po różnicowaniu i synchronizacji schodkowej szeregi makro są stacjonarne (ADF), to przy częstotliwości dziennej są **silnie persystentne** — wartość jest stała w obrębie kwartału/miesiąca, więc ACF opada bardzo wolno. To wizualnie tłumaczy, dlaczego dzienne makro nie wnosi nowej informacji o ruchach kursu (kolejne dni powtarzają tę samą wartość):
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'ACF/PACF: dzienny wzrost PKB (schodkowy)' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "ACF/PACF: makro dzienne (PKB schodkowo)"
+# Autor: Maciej Kuchcik
+
+wykres_acf_pacf(pkb_d_daily, "dzienny wzrost PKB (schodkowy)")
+```
+
+### Predykcja
+
+```{r}
+#| code-summary: "Dobór optymalnego rzędu VAR B"
+# Autor: Maciej Kuchcik
+
+var_select_B <- VARselect(var_B, lag.max = 10, type = "const")
+p_opt_B <- as.integer(var_select_B$selection["AIC(n)"])
+cat("Optymalny rząd VAR(B) (AIC):", p_opt_B, "\n")
+```
+
+```{r}
+#| code-summary: "Estymacja VAR(B) na całym treningu"
+# Autor: Maciej Kuchcik
+
+model_var_B <-VAR(var_B, p = p_opt_B, type = "const")
+summary(model_var_B)
+```
+
+```{r}
+#| code-summary: "Inicjalizacja"
+# Autor: Maciej Kuchcik
+
+n_test_var_B <- nrow(var_B_test)
+prognozy_B<- numeric(n_test_var_B)
+```
+
+```{r}
+#| code-summary: "Rekursywna prognoza VAR na zbiorze testowym"
+#| cache: true
+# Autor: Maciej Kuchcik
+
+historia_B <- as.data.frame(var_B)
+
+for (i in seq_len(n_test_var_B)) {
+  dodatkowe_dane <- if (i > 1) {
+    as.data.frame(var_B_test)[seq_len(i - 1), , drop = FALSE]
+  } else NULL
+
+  okno <- rbind(historia_B, dodatkowe_dane)
+
+  model_tmp <- VAR(okno, p = p_opt_B, type = "const")
+  pred<- predict(model_tmp, n.ahead = 1)
+  prognozy_B[i] <- pred$fcst$zamkniecia[1, "fcst"]
+}
+```
+
+```{r}
+#| code-summary: "Metryki VAR(B) w zł (porównywalne z A i naiwnym)"
+# Autor: Maciej Kuchcik
+
+daty_test_B <- index(var_B_test)
+
+cena_real_B<- as.numeric(all_data$PZU.WA.Close[daty_test_B])
+cena_prev_B<- as.numeric(lag(all_data$PZU.WA.Close, k = 1)[daty_test_B])
+cena_pred_var_B <- cena_prev_B * exp(prognozy_B)
+
+e_var_B <- cena_real_B - cena_pred_var_B
+
+metryki_var_B <- c(
+  MAE = mean(abs(e_var_B)),
+  RMSE = sqrt(mean(e_var_B^2)),
+  MAPE = mean(abs(e_var_B / cena_real_B)) * 100
+)
+
+cat("\nMetryki VAR na zbiorze testowym (zł):\n")
+print(metryki_var_B)
+```
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'VAR B: predykcja vs rzeczywistość (zbiór testowy)' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "Wykres predykcji VAR(B)"
+# Autor: Maciej Kuchcik
+
+if (FORMAT == "html") {
+  df_test_B <- data.frame(
+    x = as.numeric(as.POSIXct(daty_test_B)) * 1000,
+    rzeczywiste = cena_real_B,
+    prognoza= cena_pred_var_B,
+    blad= e_var_B
+  )
+
+  highchart() |>
+    hc_title(text = "VAR B: predykcja vs rzeczywistość (zbiór testowy)") |>
+    hc_xAxis(type = "datetime") |>
+    hc_yAxis_multiples(
+      list(title = list(text = "Cena zamknięcia (zł)"), opposite = FALSE),
+      list(title = list(text = "Błąd (zł)"), opposite = TRUE, gridLineWidth = 0)
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_test_B$x, y = df_test_B$rzeczywiste)),
+      type = "line", name = "Rzeczywista", color = "#2196F3", yAxis = 0
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_test_B$x, y = df_test_B$prognoza)),
+      type = "line", name = "Prognoza VAR(B)", color = "#FF9800",
+      dashStyle = "ShortDash", yAxis = 0
+    ) |>
+    hc_add_series(
+      data = list_parse2(data.frame(x = df_test_B$x, y = df_test_B$blad)),
+      type = "line", name = "Błąd", color = "rgba(229,57,53,0.5)", yAxis = 1
+    ) |>
+    hc_tooltip(valueDecimals = 2, valueSuffix = " zł", shared = TRUE) |>
+    hc_legend(enabled = TRUE) |>
+    hc_rangeSelector(enabled = TRUE) |>
+    hc_scrollbar(enabled = TRUE)
+
+} else {
+  par(bg = "white", col.axis = "black", col.lab = "black",
+      col.main = "black", fg = "black")
+
+  plot(daty_test_B, cena_real_B,
+       type = "l", col = "royalblue", lwd = 1.5,
+       xlab = "Data", ylab = "Cena zamknięcia (zł)",
+       main = "VAR B: predykcja vs rzeczywistość")
+  lines(daty_test_B, cena_pred_var_B, col = "tomato", lwd = 1.5, lty = 2)
+  grid(col = "#cccccc")
+
+  par(new = TRUE)
+  plot(daty_test_B, e_var_B, type = "l",
+       col = adjustcolor("red3", alpha.f = 0.4), lwd = 1,
+       axes = FALSE, xlab = "", ylab = "")
+  axis(4, col = "red3", col.axis = "red3")
+  mtext("Błąd (zł)", side = 4, line = 3, col = "red3")
+
+  legend("topleft",
+         legend = c("Rzeczywista", "Prognoza VAR(B)", "Błąd"),
+         col    = c("royalblue", "tomato", "red3"),
+         lty    = c(1, 2, 1), lwd = 2, bty = "n")
+}
+```
+
+**Wynik:** dołożenie danych makroekonomicznych **nie poprawia** prognozy, a VAR B wypada nawet gorzej niż modelu naiwnego.
+
+| Model | MAE (zł) | RMSE (zł) | MAPE |
+|---|---|---|---|
+| Naiwny | 0.522 | 0.740 | 1.31% |
+| VAR A: giełda | 0.523 | 0.740 | 1.31% |
+| VAR B: giełda + makro | 0.528 | 0.745 | 1.33% |
+
+# Wyniki
+
+Powód jest spójny z wcześniejszą diagnozą: dane makro zmieniają się wolno (kwartalnie/miesięcznie) i po synchronizacji schodkowej są w obrębie okresu stałe, nie niosą więc informacji o *dziennych* ruchach kursu. Dołożenie trzech zmiennych i dodatkowych parametrów (przy $p=10$) lekko pogarsza wynik pozapróbkowy (delikatne przeuczenie). Wniosek: na częstotliwości dziennej makro nie pomaga przewidywać kursu PZU, różnice między modelami mieszczą się w granicach szumu, a najprostszy model naiwny pozostaje twardym benchmarkiem. Po informację makro o wyższej wartości predykcyjnej należałoby sięgnąć po model jawnie mieszanej częstotliwości (np. MIDAS) zamiast wtłaczać miesięczne/kwartalne dane do dziennego VAR-a.
+
+# Wnioski i podsumowanie
+
+::: {.content-visible when-format="pdf"}
+# Bibliografia {.unnumbered}
+:::
+
+::: {#refs}
+:::
+
+
+```{=latex}
+\renewcommand{\listfigurename}{Spis rysunków}
+\listoffigures
+```
