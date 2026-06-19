@@ -273,6 +273,28 @@ estymuj_var <- function(dane, lag.max = 10) {
 }
 ```
 
+```{r}
+#| code-summary: "Funkcja 'wykres_acf_pacf'"
+# Autor: Maciej Kuchcik
+
+# Rysuje obok siebie ACF i PACF jednego szeregu. Jak rysuj_makro_wykres:
+# zawsze wersja jasna, a w HTML dodatkowo ciemna (przełączana motywem).
+wykres_acf_pacf <- function(series, tytul, lag_max = 40, format = FORMAT) {
+  s <- as.numeric(na.omit(series))
+  rdzen <- function(kolory) {
+    op <- par(mfrow = c(1, 2), bg = kolory$bg, col.axis = kolory$fg,
+              col.lab = kolory$fg, col.main = kolory$fg, fg = kolory$fg)
+    on.exit(par(op), add = TRUE)
+    acf(s,  main = paste("ACF:",  tytul), lag.max = lag_max, col = kolory$linia, lwd = 2)
+    pacf(s, main = paste("PACF:", tytul), lag.max = lag_max, col = kolory$linia, lwd = 2)
+  }
+  rdzen(list(bg = "white", fg = "black", linia = "royalblue"))
+  if (format == "html") {
+    rdzen(list(bg = "#222222", fg = "#dddddd", linia = "#6baed6"))
+  }
+}
+```
+
 # Wstęp
 
 ## Cel {#cel}
@@ -586,6 +608,28 @@ sprawdz_wszystkie <- function(data) {
 sprawdz_wszystkie(all_data_train)
 ```
 
+Test ADF potwierdza to liczbowo, a wizualnie widać to na korelogramach. Dla **poziomu** ceny zamknięcia autokorelacja (ACF) opada bardzo wolno, a PACF ma silny pik na pierwszym opóźnieniu — typowy obraz szeregu niestacjonarnego z pierwiastkiem jednostkowym:
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'ACF/PACF: cena zamknięcia (poziom)' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "ACF/PACF: poziom ceny zamknięcia"
+# Autor: Maciej Kuchcik
+
+wykres_acf_pacf(all_data_train$PZU.WA.Close, "cena zamknięcia (poziom)")
+```
+
+Po przejściu na **log-zwroty** (`diff(log(...))`) autokorelacja niemal znika — szereg jest stacjonarny i bliski białemu szumowi. To od razu zapowiada, że z samej historii zwrotów trudno cokolwiek przewidzieć (i wyjaśnia późniejszy wynik VAR ≈ model naiwny):
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'ACF/PACF: log-zwroty ceny zamknięcia' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "ACF/PACF: log-zwroty ceny zamknięcia"
+# Autor: Maciej Kuchcik
+
+wykres_acf_pacf(diff(log(all_data_train$PZU.WA.Close)), "log-zwroty zamknięcia")
+```
+
 ### Tworzenie modelu
 
 Do modelu VAR(A) trafiają wyłącznie dane giełdowe (kilka wymiarów, jedna częstotliwość). Ceny są niestacjonarne, więc każdą serię sprowadzamy do logarytmicznych stóp zwrotu (`diff(log(...))`). Transformacje liczymy na pełnym szeregu, a dopiero potem dzielimy na trening/test, wtedy nie gubimy zwrotu na granicy podziału.
@@ -725,6 +769,17 @@ if (!all(stacjonarnosc_var_B == 1)) {
   warning("NIE WSZYSTKIE zmienne stacjonarne w ADF.")
 }
 all(stacjonarnosc_var_B == 1)
+```
+
+Mimo że po różnicowaniu i synchronizacji schodkowej szeregi makro są stacjonarne (ADF), to przy częstotliwości dziennej są **silnie persystentne** — wartość jest stała w obrębie kwartału/miesiąca, więc ACF opada bardzo wolno. To wizualnie tłumaczy, dlaczego dzienne makro nie wnosi nowej informacji o ruchach kursu (kolejne dni powtarzają tę samą wartość):
+
+```{r}
+#| fig-cap: !expr "if (knitr::is_latex_output()) 'ACF/PACF: dzienny wzrost PKB (schodkowy)' else NULL"
+#| renderings: [light, dark]
+#| code-summary: "ACF/PACF: makro dzienne (PKB schodkowo)"
+# Autor: Maciej Kuchcik
+
+wykres_acf_pacf(pkb_d_daily, "dzienny wzrost PKB (schodkowy)")
 ```
 
 ### Predykcja
